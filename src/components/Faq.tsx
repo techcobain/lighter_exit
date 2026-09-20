@@ -53,7 +53,11 @@ const FAQ_ITEMS: { q: string; a: ReactNode }[] = [
   },
   {
     q: 'What about amounts below the minimum?',
-    a: 'Each asset has a minimum withdrawal amount set by Lighter. Anything under it is shown as "below minimum" and stays on the account as dust. If it matters to you, top it up above the minimum from another source before withdrawing.',
+    a: 'Each asset has a minimum withdrawal amount set by Lighter. Anything under it is shown as "below minimum" and cannot be withdrawn directly. On a sub-account you can still move it into the main account (transfers between your own accounts have no minimum and no fee) and withdraw it from there once the pieces add up. Dust left on the main account stays there.',
+  },
+  {
+    q: 'Should I move sub-account balances to the main account first?',
+    a: 'It is optional but usually better: a same-main-account transfer is free and instant, it pools dust that could not be withdrawn on its own, and you end up with one withdrawal per asset instead of one per account. Withdrawing straight from a sub-account to your wallet also works and is the only option if the API refuses the transfer.',
   },
   {
     q: 'Which wallets work?',

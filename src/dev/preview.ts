@@ -170,6 +170,20 @@ export function previewApply(id: string): void {
       }
       break
     }
+    case 'mv': {
+      const assetId = Number(rest[1])
+      const route = Number(rest[2])
+      const master = previewState.accounts.get(MASTER)
+      if (acc && master) {
+        let moved = '0'
+        if (route === 1) acc.assets.forEach((a) => { if (a.asset_id === assetId) { moved = a.balance; a.balance = '0' } })
+        else if (assetId === 3) { moved = acc.available_balance; acc.available_balance = '0' }
+        const target = master.assets.find((a) => a.asset_id === assetId)
+        if (target) target.balance = (Number(target.balance) + Number(moved)).toString()
+        acc.total_asset_value = '0'
+      }
+      break
+    }
     case 'claim':
       previewState.pendingL1.delete(Number(rest[rest.length - 1]))
       break

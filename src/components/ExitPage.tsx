@@ -58,8 +58,17 @@ export function ExitPage() {
       </main>
       <footer className="mt-12 flex flex-wrap items-center justify-between gap-3 border-t-[0.5px] border-line pt-5 text-sm text-faint">
         <p>Lighter · Self-service exit</p>
-        <p>
-          Contract{' '}
+        <p className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <a
+            href="https://github.com/techcobain/lighter_exit"
+            target="_blank"
+            rel="noreferrer"
+            className={LINK_CLASSNAME}
+          >
+            Open source on GitHub ↗
+          </a>
+          <span>
+            Contract{' '}
           <a
             href="https://etherscan.io/address/0x3B4D794a66304F130a4Db8F2551B0070dfCf5ca7"
             target="_blank"
@@ -68,6 +77,7 @@ export function ExitPage() {
           >
             0x3B4D…5ca7
           </a>
+          </span>
         </p>
       </footer>
     </div>

@@ -33,6 +33,7 @@ declare global {
     _signUnstakeAssets?: WasmFn<SignedTx>
     _signUpdatePublicPool?: WasmFn<SignedTx>
     _createAuthToken?: WasmFn<{ token: string; deadline: number }>
+    _signTransfer?: WasmFn<SignedTx>
   }
 }
 
@@ -211,6 +212,37 @@ export function signUpdatePublicPool(p: {
     p.operatorFee,
     p.minOperatorShareRate,
     p.nonce,
+  )
+}
+
+/**
+ * Transfer between accounts. Between accounts of the same main account no L1
+ * signature is needed and Lighter charges no fee, which is the only case this
+ * page uses (an empty signature is passed).
+ */
+export function signTransfer(p: {
+  accountIndex: number
+  toAccountIndex: number
+  assetIndex: number
+  fromRouteType: number
+  toRouteType: number
+  amount: bigint
+  nonce: number
+  apiKeyIndex: number
+}): Promise<SignedTx> {
+  return call(
+    window._signTransfer,
+    '_signTransfer',
+    p.accountIndex,
+    '',
+    p.nonce,
+    p.apiKeyIndex,
+    p.toAccountIndex,
+    p.assetIndex,
+    p.fromRouteType,
+    p.toRouteType,
+    Number(p.amount),
+    0,
   )
 }
 

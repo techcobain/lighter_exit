@@ -136,7 +136,7 @@ export function AccountExit({
           <ClosePositionsStep accountIndex={account.index} plan={plan} canAct={canAct} reason={reason} />
           <BurnSharesStep accountIndex={account.index} plan={plan} canAct={canAct} reason={reason} />
           <UnstakeStep accountIndex={account.index} plan={plan} assets={assets} canAct={canAct} reason={reason} />
-          <WithdrawStep accountIndex={account.index} plan={plan} canAct={canAct} reason={reason} />
+          <WithdrawStep accountIndex={account.index} plan={plan} canAct={canAct} reason={reason} master={account.account_type === ACCOUNT_TYPE.SUB ? master : undefined} />
         </div>
       )}
     </div>
