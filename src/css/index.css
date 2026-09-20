@@ -1,0 +1,65 @@
+@import "./tailwind.css";
+
+input, textarea {
+  &::-webkit-outer-spin-button, &::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  &:-internal-autofill-selected, &:-internal-autofill-previewed, &::-webkit-autofill, &:autofill {
+    -webkit-text-fill-color: var(--color-ink) !important;
+    box-shadow: 0 0 0 30px var(--color-surface) inset !important;
+    -webkit-box-shadow: 0 0 0 30px var(--color-surface) inset !important;
+    transition: background-color 5000s;
+  }
+}
+
+html {
+  background-color: var(--color-bg);
+}
+
+#root {
+  min-height: 100dvh;
+  font-family: var(--font-sans);
+  font-style: normal;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--color-ink);
+  /* opsz axis → "Inter Display" cut kicks in at large sizes; 'case' lifts
+     punctuation to cap height for the many ALL-CAPS labels; cv* tune Inter's
+     letterforms (cv11 single-story a, cv05 tailed l, cv02/03/04 open 4/6/9). */
+  font-optical-sizing: auto;
+  font-feature-settings: 'case' 1, 'calt' 1, 'cv11' 1, 'cv05' 1, 'cv02' 1, 'cv03' 1, 'cv04' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-style: normal;
+  font-weight: 400;
+  font-size: 12px;
+  font-optical-sizing: auto;
+  font-feature-settings: 'case' 1, 'calt' 1, 'cv11' 1, 'cv05' 1, 'cv02' 1, 'cv03' 1, 'cv04' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Official InterVariable — self-hosted. This woff2 is the canonical rsms
+   variable build (wght + opsz axes + all OpenType features); the family is
+   declared as 'Inter Variable' to match --font-sans. */
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../fonts/Inter/Inter.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../fonts/Inter/Inter.woff2') format('woff2');
+}

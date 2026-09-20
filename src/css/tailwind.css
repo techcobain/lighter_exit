@@ -1,0 +1,784 @@
+@import 'tailwindcss';
+
+/* `light:` variant — applies only under the light canvas (data-theme set on
+   <html> by js/providers/themeSync). Lets components opt into a light-only
+   treatment while the dark baseline stays the default. :where() keeps
+   single-class specificity so it layers predictably. */
+@custom-variant light (&:where([data-theme='light'] *));
+
+/* Tailwind drops @theme vars that no utility references, and /design-system
+   reads them through a computed var(--color-…) the scanner can't see — so a rung
+   with no call site yet resolves to nothing and its swatch renders empty. */
+@source inline("text-down-soft");
+
+/* ─────────────────────────────────────────────────────────────
+   Lighter design-system v3 tokens.
+   New token names (bg / surface / ink / up / down / line / fill … plus the
+   radius / leading / tracking ladders) — additive, no collision with the
+   legacy raw scales below. This block is the DARK baseline; the values are
+   re-bound under :root[data-theme='light'] further down (semantic flip).
+   ───────────────────────────────────────────────────────────── */
+@theme {
+  /* Surfaces — lightness encodes elevation (canvas < surface < elevated) */
+  --color-bg: #06060C; /* page canvas — anchored to the legacy black so
+                          un-migrated panels don't invert; v3 uses oklch(0.126…) */
+  --color-surface: oklch(0.185 0.012 285);
+  --color-surface-2: oklch(0.193 0.008 286);
+  --color-fill: oklch(1 0 0 / 0.05); /* translucent surface fill ≈ white 5% */
+  --color-line: oklch(1 0 0 / 0.07); /* hairline border ≈ white 7% */
+  --color-elevated: oklch(0.291 0.009 286);
+
+  /* Text — softer ink steps use opacity shorthands (text-ink/80, /50). */
+  --color-ink: oklch(0.964 0 0);
+  --color-meta: oklch(0.66 0.004 286);
+  --color-muted: oklch(0.645 0.006 275);
+  --color-dim: oklch(0.741 0.005 258);
+  --color-faint: oklch(0.56 0.006 286);
+
+  /* Accents */
+  --color-up: oklch(0.828 0.186 159); /* long / positive */
+  --color-up-strong: oklch(0.763 0.171 159); /* gradient green */
+  --color-up-bright: oklch(0.9 0.163 161); /* ticker text + live indicator green, gamut-max chroma at this lightness */
+  --color-up-pale: oklch(0.9 0.075 161); /* OB price text: near-white with a green cast (14.3:1) */
+  --color-down: oklch(0.66 0.19 19); /* short / negative (5.5:1, 83% of gamut chroma) */
+  --color-down-bright: oklch(0.77 0.12 19); /* favorites % and other small sell accents (8.6:1) */
+  --color-down-pale: oklch(0.82 0.085 19); /* OB price text: near-white with a red cast (10.9:1), dL 0.08 under up-pale so the OB price columns differ by lightness, not hue alone */
+  --color-down-soft: oklch(0.71 0.155 19); /* TP/SL stop-loss red */
+  --color-warn: oklch(0.84 0.172 84);
+  --color-link: oklch(0.857 0.07 271.6);
+  --color-vip: #1fd18f;
+  --color-chart-accent: #5E85FF; /* echarts accent — same hex both themes */
+  --color-chart-marker-sell: #b5d534; /* echarts sell marker — same hex both themes */
+  /* page-kit badge light-tint palette (web-v3 pageKit Badge tones) */
+  --color-badge-neutral-bg: #f2f3f5;
+  --color-badge-neutral-ink: #595b5e;
+  --color-badge-up-bg: #86ffcc;
+  --color-badge-up-ink: #007239;
+  --color-badge-down-bg: #ffc8c8;
+  --color-badge-down-ink: #b8001c;
+  --color-badge-warn-bg: #ffeb74;
+  --color-badge-warn-ink: #7f5000;
+  --color-badge-accent-bg: #d2f2ff;
+  --color-badge-accent-ink: #3350b6;
+
+  /* Leaderboard podium ranks — theme-INVARIANT (web-v3 keeps one set of
+     metals on both canvases; a darkened light variant reads as brown/grey
+     paint rather than gold and silver) */
+  --color-medal-gold: #ffbf00;
+  --color-medal-silver: #c4c8d2;
+  --color-medal-bronze: #cd8b4f;
+
+  /* Tint bases — bright brand steps for translucent fills; do NOT flip per theme */
+  --color-up-tint: oklch(0.72 0.16 159); /* L-matched to down-tint */
+  --color-down-tint: oklch(0.72 0.19 20.4); /* L-matched to up-tint */
+  --color-warn-tint: oklch(0.84 0.172 84);
+
+  /* Billboard banner label — theme-INVARIANT white on the coloured tone
+     surfaces in both themes (web-v3: a pale flip turns these to mud);
+     tone surfaces live in :root below */
+  --color-billboard-ink: #ffffff;
+
+  /* Brand-logo chip plate — theme-INVARIANT white so third-party wallet marks
+     stay legible on both canvases (web-v3 WalletMark) */
+  --color-logo-chip: #ffffff;
+
+  /* Alert / notification fills — RICH + DARK, not pale washes: a saturated hue
+     at low lightness carries the colour, with the bright glyph/text on top.
+     Flipped to a clean saturated tint on the light canvas in the
+     [data-theme='light'] block. */
+  --color-success-fill: oklch(0.327 0.094 158); /* deep emerald */
+  --color-danger-fill: oklch(0.338 0.128 24); /* deep crimson */
+  --color-warn-fill: oklch(0.422 0.116 80); /* deep amber/gold */
+
+  /* Notification surfaces (toasts, cards, inline banners) — the DEEP page bg
+     mixed with a touch of the tone's fill: a rich dark tinted plate that flips
+     per theme via the referenced vars. The raw *-fill tokens are brighter and
+     read washed-out when used as a full surface. */
+  --color-notif-success: color-mix(
+    in oklab,
+    var(--color-bg),
+    var(--color-success-fill) 30%
+  );
+  --color-notif-danger: color-mix(
+    in oklab,
+    var(--color-bg),
+    var(--color-danger-fill) 30%
+  );
+  --color-notif-warn: color-mix(
+    in oklab,
+    var(--color-bg),
+    var(--color-warn-fill) 30%
+  );
+
+  /* Neutral notice chip on the LIGHT canvas (web-v3 gray-900): the chip
+     inverts to a dark plate there instead of riding a faint ink wash. */
+  --color-dark-notice: #191b1d;
+
+  /* Overlay system (popovers, modals, floating pickers) — only a touch brighter
+     than the trading panels (--color-surface), so a modal reads as a raised
+     sibling of the panel, not a bright gray slab. */
+  --color-overlay: oklch(0.207 0.011 285);
+  --color-danger: oklch(0.67 0.195 19); /* off the gamut ceiling with the rest of the reds */
+  --color-success: oklch(0.828 0.186 159);
+
+  /* Fun mode */
+  --color-fun: oklch(0.622 0.288 312);
+
+  /* On-fill ink + scrim (theme-invariant) */
+  --color-scrim: oklch(0.126 0.015 284 / 0.6);
+
+  /* Radii — the "sharp" ladder (crisp, technical corners). This is the single
+     radius scale for the app; the rounded/tight variants were dropped. */
+  --radius-seam: 1px;
+  --radius-control: 2px;
+  --radius-pill: 3px;
+  --radius-card: 4px;
+  --radius-modal: 6px;
+  --radius-panel: 8px;
+
+  --aspect-wordmark: 840 / 253;
+
+  /* Denser spacing base — part of the sharp design direction:
+     every Tailwind padding / gap / size utility derives from this, ~12% tighter
+     than Tailwind's 0.25rem default. */
+  --spacing: 0.22rem;
+
+  /* Readability floor — nothing below 11px. 3xs/2xs were 9/10px; both raised to
+     the 11px floor (xs) so the smallest labels/numbers stay legible. Trying it
+     app-wide; revert these two if dense rows overflow. */
+  --text-3xs: 11px;
+  --text-2xs: 11px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 15px;
+  --text-xl: 16px;
+  --text-2xl: 18px;
+  --text-3xl: 20px;
+  --text-4xl: 22px;
+  --text-5xl: 24px;
+  --text-6xl: 30px;
+  --text-7xl: 44px;
+  --text-8xl: 56px;
+  --text-9xl: 72px;
+  --text-hero: clamp(1.5rem, 0.45rem + 3vw, 2.75rem);
+
+  /* Line-height scale — additive named steps */
+  --leading-2xs: 12px;
+  --leading-xs: 13px;
+  --leading-sm: 14px;
+  --leading-base: 15px;
+  --leading-md: 16px;
+  --leading-lg: 18px;
+  --leading-xl: 19px;
+  --leading-2xl: 24px;
+
+  /* Tracking scale — additive named steps */
+  --tracking-display: -0.03em;
+  --tracking-heading: -0.02em;
+  --tracking-caps: 0.04em;
+
+  /* Dark-mode bloom trim — heavier weights shaved on the dark canvas (variable
+     Inter renders 485/585 true); restored to 500/600 under [data-theme='light']. */
+  --font-weight-medium: 485;
+  --font-weight-semibold: 585;
+}
+
+/* Control-height ladder — rem so controls sit on a logical 4px module
+   (20/24/28/32/40). Fixed-rem on purpose: corner radius and control height are
+   independent axes, so these do NOT track --spacing. Desktop keeps the
+   hand-written heights; controls read the ladder only through their
+   max-mobile: rung, so the touch block below resizes every opted-in control
+   from one place. Page-button insets ride their own pair so the phone trim
+   stays out of the desktop recipes. */
+:root {
+  --control-h-xs: 1.25rem; /* 20px — dense chips */
+  --control-h-sm: 1.5rem; /* 24px — compact controls */
+  --control-h-md: 1.75rem; /* 28px — secondary controls */
+  --control-h-lg: 2rem; /* 32px — primary controls, table-row floor */
+  --control-h-xl: 2.5rem; /* 40px — panel header / filter bars */
+  --page-btn-px: calc(var(--spacing) * 3.5); /* 12.32px, was px-3.5 */
+  --page-btn-px-icon: calc(var(--spacing) * 3); /* 10.56px, was pl-3 / pr-3 */
+}
+
+/* Touch rung: below the mobile breakpoint every control token steps up one
+   rung, capped at 36px (the visual cap); xl is already above the cap and
+   stays. The base spacing unit is deliberately NOT scaled — every padding
+   and gap rides it, so inflating it would grow the whole mobile layout and
+   reintroduce overflow at 320px. */
+@media (width < 768px) {
+  :root {
+    --control-h-xs: 1.5rem; /* 20 → 24px */
+    --control-h-sm: 1.75rem; /* 24 → 28px */
+    --control-h-md: 2rem; /* 28 → 32px */
+    --control-h-lg: 2.25rem; /* 32 → 36px, the cap */
+    --control-h-xl: 2.5rem; /* 40px, unchanged: already above the cap */
+    /* Phone page buttons lose ~5px of inset per side so a four-up action row
+       still fits one line at 320px. */
+    --page-btn-px: calc(var(--spacing) * 2); /* 12.32 → 7.04px */
+    --page-btn-px-icon: calc(var(--spacing) * 1.5); /* 10.56 → 5.28px */
+  }
+}
+
+@theme {
+  --font-sans: 'Inter Variable', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo,
+    Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+
+  --color-transparent: transparent;
+
+  /* The only breakpoints: `initial` deletes Tailwind's sm/md/lg/xl/2xl.
+     Mirrored in JS by ResponsivenessProvider — change both or neither.
+     tablet matches web-v3; it must stay above 1017px or the navbar clips.
+     sonner-mobile is the sonner library's internal switch, not a layout
+     breakpoint. */
+  --breakpoint-*: initial;
+  --breakpoint-sonner-mobile: 600px;
+  --breakpoint-mobile: 768px;
+  --breakpoint-tablet: 1170px;
+
+  --tracking-compact: -0.1px;
+
+  --blur-smd: 6px;
+
+  --transition-property-toggle-thumb: transform, background-color;
+
+  --shadow-toggle-thumb: 0 1px 2px rgba(6, 6, 12, 0.3);
+  --shadow-notification: 0 16px 32px 0 rgba(6, 6, 12, 0.55), 0 4px 8px 0 rgba(6, 6, 12, 0.45), 0 1px 2px 0 rgba(6, 6, 12, 0.35), 0 0 0 0.5px rgba(243, 243, 243, 0.1);
+  --shadow-notification-success: 0 16px 32px 0 rgba(6, 6, 12, 0.55), 0 4px 8px 0 rgba(6, 6, 12, 0.45), 0 1px 2px 0 rgba(6, 6, 12, 0.35), 0 0 0 0.5px rgba(27, 210, 137, 0.22);
+  --shadow-notification-error: 0 16px 32px 0 rgba(6, 6, 12, 0.55), 0 4px 8px 0 rgba(6, 6, 12, 0.45), 0 1px 2px 0 rgba(6, 6, 12, 0.35), 0 0 0 0.5px rgba(255, 56, 79, 0.22);
+  --shadow-notification-warning: 0 16px 32px 0 rgba(6, 6, 12, 0.55), 0 4px 8px 0 rgba(6, 6, 12, 0.45), 0 1px 2px 0 rgba(6, 6, 12, 0.35), 0 0 0 0.5px rgba(255, 159, 46, 0.22);
+  --shadow-green-horizontal: 22px 0 6px 0 rgba(56, 255, 142, 0.00), 14px 0 6px 0 rgba(56, 255, 142, 0.04), 8px 0 5px 0 rgba(56, 255, 142, 0.12), 4px 0 4px 0 rgba(56, 255, 142, 0.21), 1px 0 2px 0 rgba(56, 255, 142, 0.24);
+  --shadow-red-horizontal: 22px 0 6px 0 rgba(255, 57, 79, 0.00), 14px 0 6px 0 rgba(255, 57, 79, 0.04), 8px 0 5px 0 rgba(255, 57, 79, 0.12), 4px 0 4px 0 rgba(255, 57, 79, 0.21), 1px 0 2px 0 rgba(255, 57, 79, 0.24);
+  --shadow-white-horizontal: 26px 0 7px 0 rgba(243, 243, 243, 0.00), 17px 0 7px 0 rgba(243, 243, 243, 0.04), 9px 0 6px 0 rgba(243, 243, 243, 0.12), 4px 0 4px 0 rgba(243, 243, 243, 0.21), 1px 0 2px 0 rgba(243, 243, 243, 0.24);
+  --shadow-desktop-modal: 0 2px 12px 0 rgba(6, 6, 12, 0.35), 0 2px 24px 0 rgba(6, 6, 12, 0.25), 0 2px 36px 0 rgba(6, 6, 12, 0.15), 0 2px 48px 0 rgba(6, 6, 12, 0.05);
+  --shadow-settings-drawer: 0 1px 4px rgba(6, 6, 12, 0.30), 0 2px 8px rgba(6, 6, 12, 0.20), 0 3px 12px rgba(6, 6, 12, 0.10), 0 4px 4px rgba(6, 6, 12, 0.05);
+  --shadow-market-selector: 12px 12px 36px 0 rgba(0, 0, 0, 0.25), 8px 8px 24px 0 rgba(0, 0, 0, 0.35), 4px 4px 12px 0 rgba(0, 0, 0, 0.40);
+  --shadow-mobile-modal: 0 4px 4px 0 rgba(0, 0, 0, 0.25);
+  --shadow-chart-note: 0 0 0 0.5px rgba(243, 243, 243, 0.05), 0 2px 24px 0 rgba(6, 6, 12, 0.10), 0 2px 8px 0 rgba(6, 6, 12, 0.25);
+
+  --background-image-scroll-indicator: linear-gradient(90deg, rgba(6, 6, 12, 0) 0%, rgba(6, 6, 12, 0.5) 100%);
+  --background-image-scroll-indicator-left: linear-gradient(90deg, var(--color-surface) 0%, var(--color-surface) 60%, transparent 100%);
+  --background-image-scroll-indicator-right: linear-gradient(270deg, var(--color-surface) 0%, var(--color-surface) 60%, transparent 100%);
+  --background-image-vertical-scroll-indicator: linear-gradient(180deg, transparent 0%, var(--color-bg) 100%);
+  --background-image-green-gradient: linear-gradient(to left, transparent 80%, color-mix(in srgb, var(--color-up-tint) 10%, transparent) 100%);
+  --background-image-red-gradient: linear-gradient(to left, transparent 80%, color-mix(in srgb, var(--color-down-tint) 10%, transparent) 100%);
+  --background-image-ink-gradient: linear-gradient(to left, transparent 80%, color-mix(in srgb, var(--color-ink) 8%, transparent) 100%);
+  --background-image-market-selector-sidebar: linear-gradient(270deg, #121218 0%, #1F1F24 100%);
+  --background-image-fun-row: linear-gradient(90deg, rgba(191, 41, 255, 0.06), rgba(236, 72, 153, 0.03));
+
+  --animate-settings-drawer-in: settings-drawer-in 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-settings-drawer-out: settings-drawer-out 180ms ease-out forwards;
+  --animate-settings-drawer-in-mobile: settings-drawer-in-mobile 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-settings-drawer-out-mobile: settings-drawer-out-mobile 180ms ease-out forwards;
+  --animate-grow-up: grow-up 150ms ease-in-out;
+  --animate-grow-down: grow-down 150ms ease-in-out;
+  --animate-fade-in: fade-in 150ms ease-in-out;
+  --animate-fade-out: fade-out 150ms ease-in-out;
+  --animate-new-order-fade-out: fade-in-out 700ms ease-in-out forwards;
+  --animate-rotating-banner-band: rotating-banner-band 500ms ease-in-out;
+  --animate-rotating-banner-blur: rotating-banner-blur 500ms linear;
+  --animate-collapsible-slide-up: collapsible-slide-up 150ms ease-in-out;
+  --animate-collapsible-slide-down: collapsible-slide-down 150ms ease-in-out;
+  --animate-pulse: pulse 2400ms ease-out infinite;
+  --animate-small-pulse: small-pulse 1800ms ease-out infinite;
+  --animate-fire: hdr-fire 1.5s ease-in-out infinite;
+  --animate-leaf: hdr-leaf 2.8s ease-in-out infinite;
+  --animate-star: hdr-star 1.6s ease-in-out infinite;
+  --animate-podium-bar: podium-bar 2.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  --animate-podium-bar-b: podium-bar 2.8s cubic-bezier(0.45, 0, 0.55, 1) -1.4s infinite;
+  --animate-podium-flag: podium-flag 2.8s ease-in-out infinite;
+
+  @keyframes settings-drawer-in {
+    0% {
+      transform: translateX(32px);
+      opacity: 0;
+    }
+    60% {
+      transform: translateX(-1px);
+      opacity: 1;
+    }
+    100% {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+  @keyframes settings-drawer-out {
+    0% {
+      transform: translateX(0);
+      opacity: 1;
+    }
+    100% {
+      transform: translateX(32px);
+      opacity: 0;
+    }
+  }
+  @keyframes settings-drawer-in-mobile {
+    0% {
+      transform: translateY(100%);
+      opacity: 0;
+    }
+    60% {
+      transform: translateY(-4px);
+      opacity: 1;
+    }
+    100% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+  @keyframes settings-drawer-out-mobile {
+    0% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+    100% {
+      transform: translateY(100%);
+      opacity: 0;
+    }
+  }
+  @keyframes collapsible-slide-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-collapsible-content-height);
+    }
+  }
+  @keyframes collapsible-slide-up {
+    from {
+      height: var(--radix-collapsible-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+  @keyframes grow-up {
+    from {
+      transform: scaleY(0);
+    }
+    to {
+      transform: scaleY(1);
+    }
+  }
+  @keyframes grow-down {
+    from {
+      transform: scaleY(1);
+    }
+    to {
+      transform: scaleY(0);
+    }
+  }
+  @keyframes fade-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes fade-in-out {
+    0% {
+      opacity: 0;
+    }
+    50% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+  @keyframes rotating-banner-band {
+    0% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(0.95);
+      opacity: 0;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+  @keyframes rotating-banner-blur {
+    0% {
+      filter: blur(0);
+    }
+    50% {
+      filter: blur(2px);
+    }
+    100% {
+      filter: blur(0);
+    }
+  }
+  @keyframes flicker {
+    0% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes pulse {
+    0% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.2;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes small-pulse {
+    0% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.6;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes hdr-fire {
+    0%, 100% { transform: scale(1, 1) rotate(0deg); }
+    25% { transform: scale(1.07, 0.95) rotate(-3deg); }
+    50% { transform: scale(0.96, 1.06) rotate(2deg); }
+    75% { transform: scale(1.04, 0.99) rotate(-1.5deg); }
+  }
+  @keyframes hdr-leaf {
+    0%, 100% { transform: rotate(-7deg); }
+    50% { transform: rotate(6deg); }
+  }
+  @keyframes hdr-star {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.12); opacity: 0.85; }
+  }
+  @keyframes podium-bar {
+    0%, 100% { transform: scaleY(0.74); }
+    50% { transform: scaleY(1); }
+  }
+  @keyframes podium-flag {
+    0%, 100% { transform: translateY(0.6px); }
+    50% { transform: translateY(-0.5px); }
+  }
+}
+
+@property --rfq-orbit-angle {
+  syntax: '<angle>';
+  initial-value: 180deg;
+  inherits: false;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Shadow recipes consumed by the UI kit. The old semantic colour layer
+   (surface-* / foreground-* / stroke-*) was fully migrated to the v3
+   vocabulary and removed — only the shadow tokens that are actually used
+   remain here. Light-mode shadow overrides live in the [data-theme='light']
+   block below.
+   ───────────────────────────────────────────────────────────── */
+@theme {
+  --shadow-border-danger: inset 0 0 0 0.5px color-mix(in srgb, var(--color-down-tint) 20%, transparent);
+  --shadow-border-success: inset 0 0 0 0.5px color-mix(in srgb, var(--color-up-tint) 20%, transparent);
+  --shadow-border-warning: inset 0 0 0 0.5px color-mix(in srgb, var(--color-warn-tint) 20%, transparent);
+  --shadow-border-button-primary: inset 0 0 0 0.5px color-mix(in srgb, #06060C 8%, transparent);
+
+  --shadow-elevate-popover: 0 0 0 0.5px rgba(243, 243, 243, 0.08), 0 1px 2px rgba(6, 6, 12, 0.35), 0 4px 8px rgba(6, 6, 12, 0.45);
+  --shadow-elevate-modal: 0 0 0 0.5px rgba(243, 243, 243, 0.1), 0 1px 2px rgba(6, 6, 12, 0.35), 0 4px 8px rgba(6, 6, 12, 0.45), 0 16px 32px rgba(6, 6, 12, 0.55);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Theme layer. The @theme blocks above are the DARK baseline (values land on
+   :root). A theme is just a re-binding of the same token names — dark stays the
+   default; [data-theme='light'] (set on <html> by js/providers/themeSync)
+   re-points the v3 surface / text / accent ladder, and the bridged legacy tokens
+   follow via their var() refs. [data-radius='sharp'] is an independent
+   corner-crispness axis. --ring-crisp / --hl-* / --img-ring / --shadow-edge /
+   --buy-rgb / --sell-rgb are cross-theme primitives that stay fixed across
+   themes; uikit components read them via var().
+   ───────────────────────────────────────────────────────────── */
+:root {
+  color-scheme: dark;
+  --ring-crisp: rgba(0, 0, 0, 1);
+  --hl-top: rgba(255, 255, 255, 0.08); /* materiality edge highlight (top band) */
+  --hl-y: 0.4px;
+  --edge-under: transparent; /* under-shade for crisp page-kit surfaces (light only) */
+  --img-ring: rgba(255, 255, 255, 0.1); /* hairline on raster artwork (coin logos) */
+  --ring-soft: rgba(243, 243, 243, 0.05); /* subtle inset ring on neutral chrome */
+  --ring-solid: rgba(6, 6, 12, 0.14); /* inset edge on a SOLID brand fill (side toggle, danger CTA) */
+  --coin-disc: #1e1e22; /* theme-invariant backing for coin artwork stacks */
+  --coin-ring-hover: rgba(255, 255, 255, 0.3);
+  --coin-shadow: 2.571px 2.571px 5.143px 0px rgba(6, 6, 12, 0.25);
+  --coin-drop-rest: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.15));
+  --coin-drop-hover: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.5));
+  --shadow-edge: rgba(243, 243, 243, 0.2); /* hairline ringing a floating surface */
+  /* Order-side translucent fills — neon bases tuned for tinting, deliberately
+     NOT tracking the directional text ladder above (tuned for reading), so
+     retuning up/down leaves these alone. */
+  --buy-rgb: 60, 255, 178;
+  --sell-rgb: 255, 0, 64;
+  /* Order-side / CTA fills are SOLID on both themes — the 0.20 neon tint plus a
+     colored label read as mud. Per-side labels: deep green on the green fill,
+     white on the red fill. */
+  --side-fill: 1;
+  --side-active-buy: #003e13; /* green/800 — text.on-brand */
+  --side-active-sell: #ffffff;
+  --cta-fill: 1;
+  --cta-label-buy: #003e13;
+  --cta-label-sell: #ffffff;
+
+  --shadow-market-card: 0 4px 14px rgba(0, 0, 0, 0.3);
+  --shadow-market-card-selected: 0 0 #0000;
+  /* not bound in @theme — keeps Tailwind's default shadow-sm utility intact */
+  --shadow-sm: 0 1px 2px 0 rgba(6, 6, 12, 0.3), 0 2px 6px 0 rgba(6, 6, 12, 0.35);
+  --shadow-view-toggle: 0 1px 2px rgba(0, 0, 0, 0.18);
+  --shadow-market-tooltip: 0 4px 14px rgba(0, 0, 0, 0.28);
+  --shadow-footer-top: 0 -5px 10px #06060c;
+  --dot-ring: rgba(0, 0, 0, 0.25);
+
+  /* Launch-showcase stage — theme-INVARIANT blueprint sheet (always dark;
+     the reel's frames are drawn in white ink on it regardless of app theme). */
+  --showcase-sheet: #06060c;
+  --showcase-panel: rgba(10, 10, 13, 0.97);
+  --showcase-elevated-rgb: 23, 23, 29;
+  --showcase-ink-rgb: 255, 255, 255;
+  /* the dark theme's link accent, pinned: the sheet never flips, so its
+     accent must not follow the theme's link token onto the light value */
+  --showcase-accent: oklch(0.857 0.07 271.6);
+  /* ink on the solid buy-green CTA in the orders frame */
+  --showcase-on-buy: #003e13;
+
+  /* Billboard banner tone surfaces + reel window (web-v3 Billboard: coloured
+     tone surfaces, theme-reactive). Faces are PLAIN — no edge/inset chrome;
+     the reel's rounding + the window's ring carry the shape. Danger/warning
+     are deep saturated gradients holding white ink on either canvas; primary
+     is a neutral chip: the translucent fill on dark, solid graphite on light
+     (light override below). */
+  --billboard-tone-primary: var(--color-fill);
+  --billboard-tone-danger: linear-gradient(
+    180deg,
+    oklch(0.475 0.195 25) 0%,
+    oklch(0.4 0.178 25) 100%
+  );
+  --billboard-tone-warning: linear-gradient(
+    180deg,
+    oklch(0.565 0.132 76) 0%,
+    oklch(0.49 0.122 74) 100%
+  );
+  --billboard-window: var(--color-surface);
+  --billboard-ring: 0 0 0 0.5px var(--ring-crisp);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  /* Button chrome gradients — light canvas only (referenced by uikit Button). */
+  --btn-primary-grad: linear-gradient(to bottom, #2c2e31, #191b1d);
+  --btn-primary-grad-hover: linear-gradient(to bottom, #191b1d, #070709);
+  --btn-chrome-grad: linear-gradient(to bottom, #ffffff, #f2f3f5);
+  --btn-chrome-grad-hover: linear-gradient(to bottom, #f2f3f5, #e0e1e4);
+  /* Primary Button edge — top sheen + inner hairline + crisp outer ring. */
+  --btn-primary-shadow:
+    inset 0 0.4px 0 0 rgba(255, 255, 255, 0.16),
+    inset 0 0 0 0.5px rgba(6, 6, 6, 0.1), 0 0 0 0.5px var(--ring-crisp);
+  /* Billboard primary chip — solid graphite so the translucent fill never
+     washes out against the white window (web-v3 DARK_NOTICE_LIGHT). */
+  --billboard-tone-primary: #191b1d;
+  /* Restore standard weights — dark blooms, light does not (see @theme). */
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --ring-crisp: rgba(6, 6, 12, 0.13);
+  --hl-top: transparent; /* design: no materiality band on light */
+  --edge-under: rgba(6, 6, 12, 0.08);
+  --hl-y: 0px;
+  --img-ring: rgba(0, 0, 0, 0.1);
+  --ring-soft: rgba(6, 6, 12, 0.14);
+  --shadow-edge: rgba(6, 6, 12, 0.05);
+  --shadow-sm: 0 1px 2px 0 rgba(6, 6, 12, 0.05), 0 2px 6px 0 rgba(6, 6, 12, 0.05);
+  --shadow-market-card: 0 4px 12px rgba(6, 6, 12, 0.13), 0 0 0 0.5px var(--ring-crisp);
+  --shadow-market-card-selected: 0 1px 2px rgba(6, 6, 12, 0.1);
+  --shadow-footer-top: 0 -4px 12px rgba(6, 6, 12, 0.1);
+  --buy-rgb: 29, 234, 153; /* greenA base — #1dea99 */
+  --sell-rgb: 255, 17, 68; /* redA base — #ff1144 */
+  /* v3 surfaces — white canvas, faint-gray washed panels, white overlays.
+     perps-fe maps panel/table backgrounds to bg-surface. On the white canvas a
+     pure-white surface would vanish into the bg, so surface is a hair off-white
+     here to keep panels visibly separated. */
+  --color-bg: oklch(1 0 0);
+  --color-surface: oklch(1 0 0); /* pure white — exact design parity */
+  --color-surface-2: oklch(0.954 0.003 248);
+  --color-fill: oklch(0 0 0 / 0.02);
+  --color-line: oklch(0 0 0 / 0.07);
+  --color-elevated: oklch(0.928 0.005 275);
+
+  /* Alert fills — light can't go "dark", so a clean saturated tint on the white
+     canvas (a clear coloured card, not a muddy pastel). */
+  --color-success-fill: oklch(0.912 0.103 158);
+  --color-danger-fill: oklch(0.892 0.08 21);
+  --color-warn-fill: oklch(0.912 0.118 96);
+
+  /* Text — ramp inverted (ink darkest → faint lightest) */
+  --color-ink: oklch(0.217 0.007 258);
+  --color-dim: oklch(0.367 0.009 261);
+  --color-meta: oklch(0.478 0.007 256);
+  --color-muted: oklch(0.508 0.008 261);
+  --color-faint: oklch(0.575 0.008 261);
+
+  /* Accents — legible single steps on white; tint bases stay bright (above) */
+  --color-up: oklch(0.484 0.126 152);
+  --color-up-strong: oklch(0.484 0.126 152);
+  --color-up-bright: oklch(0.484 0.126 152);
+  --color-up-pale: oklch(0.484 0.126 152); /* = up: the near-white OB price treatment is dark-only */
+  --color-down: oklch(0.569 0.229 22);
+  --color-down-bright: oklch(0.569 0.229 22);
+  --color-down-pale: oklch(0.569 0.229 22); /* = down */
+  --color-down-soft: oklch(0.569 0.229 22);
+  --color-warn: oklch(0.653 0.136 79);
+  --color-link: #2b4fd8; /* blue/600 — blue/400 sat at 3.21:1 on white */
+  --color-vip: #0c9b6b; /* VIP tier gem — deep emerald for the white canvas */
+
+  /* Overlay system — off-white popovers (a hair below the white canvas so a
+     modal reads as its own raised surface) */
+  --color-overlay: oklch(0.982 0.001 285);
+  --color-danger: oklch(0.569 0.229 22);
+  --color-success: oklch(0.484 0.126 152);
+  --color-fun: oklch(0.549 0.26 312);
+
+  /* Soft elevation on white — dark edge ring instead of the dark-canvas light one */
+  --shadow-elevate-popover: 0 0 0 0.5px rgba(6, 6, 12, 0.05), 0 1px 2px rgba(6, 6, 12, 0.05), 0 4px 12px rgba(6, 6, 12, 0.08);
+  --shadow-elevate-modal: 0 0 0 0.5px rgba(6, 6, 12, 0.06), 0 1px 2px rgba(6, 6, 12, 0.04), 0 3px 8px rgba(6, 6, 12, 0.05), 0 10px 20px rgba(6, 6, 12, 0.07);
+
+  /* Notification/Toast shadows — light variants (the :root ones are dark-canvas
+     drops; on white they read far too heavy). Soft elevation + a colored intent
+     ring per variant. */
+  --shadow-notification: 0 0 0 0.5px rgba(6, 6, 12, 0.08), 0 1px 2px rgba(6, 6, 12, 0.04), 0 3px 8px rgba(6, 6, 12, 0.05), 0 10px 20px rgba(6, 6, 12, 0.07);
+  --shadow-notification-success: 0 0 0 0.5px rgba(0, 143, 79, 0.35), 0 1px 2px rgba(6, 6, 12, 0.04), 0 3px 8px rgba(6, 6, 12, 0.05), 0 10px 20px rgba(6, 6, 12, 0.07);
+  --shadow-notification-error: 0 0 0 0.5px rgba(222, 0, 49, 0.32), 0 1px 2px rgba(6, 6, 12, 0.04), 0 3px 8px rgba(6, 6, 12, 0.05), 0 10px 20px rgba(6, 6, 12, 0.07);
+  --shadow-notification-warning: 0 0 0 0.5px rgba(214, 138, 0, 0.4), 0 1px 2px rgba(6, 6, 12, 0.04), 0 3px 8px rgba(6, 6, 12, 0.05), 0 10px 20px rgba(6, 6, 12, 0.07);
+}
+
+/* The shadow-notification* utilities inline their dark @theme value, so the
+   light vars above can't reach them on their own — re-point the utility's
+   box-shadow at the (now light) var when the light theme is active. Unlayered,
+   so it wins over the @layer utilities; scoped to [data-theme='light']. */
+[data-theme='light'] .shadow-notification {
+  box-shadow: var(--shadow-notification);
+}
+[data-theme='light'] .shadow-notification-success {
+  box-shadow: var(--shadow-notification-success);
+}
+[data-theme='light'] .shadow-notification-error {
+  box-shadow: var(--shadow-notification-error);
+}
+[data-theme='light'] .shadow-notification-warning {
+  box-shadow: var(--shadow-notification-warning);
+}
+[data-theme='light'] .shadow-elevate-popover {
+  box-shadow: var(--shadow-elevate-popover);
+}
+[data-theme='light'] .shadow-elevate-modal {
+  box-shadow: var(--shadow-elevate-modal);
+}
+
+/* Small uppercase metadata label (status pills, footer links, column heads). */
+@utility label-meta {
+  font-size: var(--text-3xs);
+  line-height: var(--leading-2xs);
+  letter-spacing: 0.4px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+/* Keep an element scrollable but render no scrollbar gutter (no reflow when it
+   appears). Firefox honors scrollbar-width; WebKit needs the pseudo hidden. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Sticky table action cell (row): fades to the OPAQUE panel stack (fill over
+   bg — fill alone is translucent) so scrolled columns never show through. The
+   top layer carries the row's own wash (--row-tint, set by highlighted /
+   hovered rows) so the sticky zone matches the rest of the row instead of
+   dropping its highlight. These MUST be utilities, not theme tokens: a var()
+   nested inside a :root-defined custom property resolves at :root, so a
+   row-scoped --row-tint would never reach it. */
+@utility bg-sticky-table-cell {
+  background-image:
+    linear-gradient(90deg, transparent 0%, var(--row-tint, transparent) 15%),
+    linear-gradient(90deg, transparent 0%, var(--color-fill) 15%),
+    linear-gradient(90deg, transparent 0%, var(--color-bg) 15%);
+}
+
+/* Sticky table action cell (header): same fade, but to the HEADER's opaque
+   stack — the header row already paints fill over the panel's fill, so the
+   sticky cell needs fill twice over bg to blend in. */
+@utility bg-sticky-table-header {
+  background-image:
+    linear-gradient(90deg, transparent 0%, var(--color-fill) 15%),
+    linear-gradient(90deg, transparent 0%, var(--color-fill) 15%),
+    linear-gradient(90deg, transparent 0%, var(--color-bg) 15%);
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    /* gray-9 */
+    border-color: #2B2B30;
+  }
+  /* Light canvas: the dark gray-9 default reads as a heavy black hairline on
+     white, so bare `border` elements (no explicit colour) fall back to the
+     themed faint line instead — matching border-line. */
+  [data-theme='light'] *,
+  [data-theme='light'] ::after,
+  [data-theme='light'] ::before,
+  [data-theme='light'] ::backdrop,
+  [data-theme='light'] ::file-selector-button {
+    border-color: var(--color-line);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@layer base {
+  * {
+    -ms-overflow-style: none; /* Internet Explorer 10+ */
+    scrollbar-width: none; /* Firefox */
+
+    ::-webkit-scrollbar {
+      display: none; /* Safari and Chrome */
+    }
+
+    outline: none;
+  }
+}
