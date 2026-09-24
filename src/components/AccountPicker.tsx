@@ -3,18 +3,21 @@ import { useMemo } from 'react'
 import cn from '../lib/cn'
 import { ACCOUNT_TYPE } from '../lib/config'
 import { accountTypeLabel, formatUsd } from '../lib/format'
+import { operatorValue } from '../lib/plan'
 import { LABEL_CLASSNAME } from '../lib/recipes'
 
 import type { DetailedAccount } from '../lib/types'
 
 export function accountHasSomething(a: DetailedAccount): boolean {
+  // For pools only the operator's part counts; depositors' money is not the owner's to act on.
+  const isPool = a.account_type === ACCOUNT_TYPE.PUBLIC_POOL
   return (
     (a.positions?.length ?? 0) > 0 ||
     (a.shares?.some((s) => s.shares_amount > 0) ?? false) ||
     (a.total_order_count ?? 0) > 0 ||
     (a.pending_unlocks?.length ?? 0) > 0 ||
-    Number(a.total_asset_value) > 0 ||
-    (a.assets?.some((x) => Number(x.balance) > 0) ?? false)
+    (isPool ? operatorValue(a).yours > 0.005 : Number(a.total_asset_value) > 0) ||
+    (!isPool && (a.assets?.some((x) => Number(x.balance) > 0) ?? false))
   )
 }
 
@@ -29,7 +32,7 @@ export function sortAccounts(accounts: DetailedAccount[]): DetailedAccount[] {
     const am = a.account_type === ACCOUNT_TYPE.MASTER ? 1 : 0
     const bm = b.account_type === ACCOUNT_TYPE.MASTER ? 1 : 0
     if (am !== bm) return bm - am
-    return Number(b.total_asset_value) - Number(a.total_asset_value) || a.index - b.index
+    return operatorValue(b).yours - operatorValue(a).yours || a.index - b.index
   })
 }
 
@@ -85,7 +88,10 @@ export function AccountPicker({
                   )}
                 </span>
                 <span className="font-mono text-2xs text-meta">
-                  #{a.index} · {formatUsd(a.total_asset_value)}
+                  #{a.index} · {formatUsd(operatorValue(a).yours)}
+                  {a.account_type === ACCOUNT_TYPE.PUBLIC_POOL && operatorValue(a).depositors > 0.005 && (
+                    <span className="text-faint"> · {formatUsd(operatorValue(a).depositors)} depositors&apos;</span>
+                  )}
                 </span>
               </span>
             </button>

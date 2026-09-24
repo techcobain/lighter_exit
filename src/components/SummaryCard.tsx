@@ -27,9 +27,10 @@ const KIND_LABEL: Record<string, string> = {
   claim: 'Ethereum claims',
   freeze: 'Pool freezes',
   opburn: 'Operator share burns',
+  sweep: 'Pool leftovers moved',
 }
 
-const KIND_ORDER = ['regkey', 'cancel', 'pos', 'shares', 'unstake', 'freeze', 'opburn', 'mv', 'wd', 'claim']
+const KIND_ORDER = ['regkey', 'cancel', 'pos', 'shares', 'unstake', 'freeze', 'opburn', 'sweep', 'mv', 'wd', 'claim']
 
 /** Action ids are `<kind>-…`; unstakes share the `shares-` prefix, so tell them apart by label. */
 function kindOf(id: string, state: ActionState): string {

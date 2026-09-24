@@ -68,6 +68,20 @@ export interface ExitPlan {
 
 const USDC_ASSET_ID = 3
 
+/**
+ * How much of a pool account's value is the operator's. Depositors' shares back
+ * the rest and are never the operator's to withdraw. A frozen pool with no
+ * shares left holds only leftovers, which the operator may move out.
+ */
+export function operatorValue(account: DetailedAccount): { yours: number; depositors: number; total: number } {
+  const total = Number(account.total_asset_value) || 0
+  const info = account.pool_info
+  if (!info) return { yours: total, depositors: 0, total }
+  if (info.total_shares <= 0) return { yours: total, depositors: 0, total }
+  const yours = (total * info.operator_shares) / info.total_shares
+  return { yours, depositors: total - yours, total }
+}
+
 export function buildPlan(
   account: DetailedAccount,
   markets: Map<number, MarketDetails>,

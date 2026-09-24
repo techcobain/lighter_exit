@@ -8,6 +8,7 @@ import { useWalletGuard } from '../hooks/useWalletGuard'
 import cn from '../lib/cn'
 import { ACCOUNT_TYPE } from '../lib/config'
 import { accountTypeLabel, formatAmount, formatCountdown, formatDateTime, formatUsd, shortenAddress } from '../lib/format'
+import { operatorValue } from '../lib/plan'
 import { LABEL_CLASSNAME } from '../lib/recipes'
 import { toMillis } from '../lib/time'
 
@@ -66,10 +67,18 @@ export function AccountExit({
           </span>
           <div className="flex items-baseline gap-2">
             <span className="font-mono text-5xl font-medium tracking-display text-ink tabular-nums">
-              {formatUsd(account.total_asset_value)}
+              {formatUsd(isPool ? operatorValue(account).yours : account.total_asset_value)}
             </span>
-            <span className="text-md text-meta">total value</span>
+            <span className="text-md text-meta">{isPool ? 'your share' : 'total value'}</span>
           </div>
+          {isPool && (
+            <span className="text-sm text-dim">
+              Pool holds {formatUsd(operatorValue(account).total)}
+              {operatorValue(account).depositors > 0.005 && (
+                <>, of which {formatUsd(operatorValue(account).depositors)} belongs to depositors and is not yours to withdraw</>
+              )}
+            </span>
+          )}
           <span className="font-mono text-2xs text-faint">owner {shortenAddress(account.l1_address)}</span>
         </div>
         <div className="flex items-center gap-3 text-sm text-faint">
