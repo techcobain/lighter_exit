@@ -11,20 +11,27 @@ import { mainnet } from 'wagmi/chains'
 import { useAccount, usePublicClient, useSwitchChain, useWriteContract } from 'wagmi'
 
 import { isPreview, previewApply } from '../dev/preview'
-import { L1_TRACK_TIMEOUT_MS, LIGHTER_CONTRACT } from '../lib/config'
-import { lighterAbi } from '../lib/contract'
+import {
+  L1_CORE_MESSAGING_CONTRACT,
+  L1_TRACK_TIMEOUT_MS,
+  LEGACY_ZKLIGHTER_IMPL,
+  LIGHTER_CONTRACT,
+  PRIORITY_CUTOVER_MS,
+  PRIORITY_ROUTE_OVERRIDE,
+} from '../lib/config'
+import { EIP1967_IMPLEMENTATION_SLOT, l1Abi, priorityRouteFor, resolveL1Call, type PriorityRoute } from '../lib/contract'
 import { describeError } from '../lib/format'
 import { fetchTxFromL1Hash, isExecuted, l2ExecutionError } from '../lib/lighterApi'
 
 import { useActions } from './useActions'
 
-type WriteFn = ContractFunctionName<typeof lighterAbi, 'nonpayable' | 'payable'>
+type WriteFn = ContractFunctionName<typeof l1Abi, 'nonpayable' | 'payable'>
 
 export interface L1ActionRequest<F extends WriteFn = WriteFn> {
   id: string
   label: string
   functionName: F
-  args: ContractFunctionArgs<typeof lighterAbi, 'nonpayable' | 'payable', F>
+  args: ContractFunctionArgs<typeof l1Abi, 'nonpayable' | 'payable', F>
   /** Skip waiting for Lighter to execute (e.g. pure L1 pending-balance claims). */
   l1Only?: boolean
   /** Query keys to refresh once Lighter has executed the transaction. */
@@ -32,6 +39,20 @@ export interface L1ActionRequest<F extends WriteFn = WriteFn> {
 }
 
 const POLL_MS = 8_000
+
+type SlotReader = { getStorageAt(a: { address: `0x${string}`; slot: `0x${string}` }): Promise<`0x${string}` | undefined> }
+
+/** Reads where Priority Transactions go right now (the ZkLighter upgrade flips it). */
+async function currentPriorityRoute(client: SlotReader | undefined): Promise<PriorityRoute> {
+  if (PRIORITY_ROUTE_OVERRIDE !== 'auto') return PRIORITY_ROUTE_OVERRIDE
+  let slot: `0x${string}` | undefined
+  try {
+    slot = await client?.getStorageAt({ address: LIGHTER_CONTRACT, slot: EIP1967_IMPLEMENTATION_SLOT })
+  } catch {
+    slot = undefined
+  }
+  return priorityRouteFor(slot, LEGACY_ZKLIGHTER_IMPL, PRIORITY_CUTOVER_MS, Date.now())
+}
 
 export function useL1Action() {
   const { update } = useActions()
@@ -101,14 +122,13 @@ export function useL1Action() {
           update(id, { status: 'preparing', message: 'Switch your wallet to Ethereum mainnet' })
           await switchChainAsync({ chainId: mainnet.id })
         }
+        const route = await currentPriorityRoute(publicClient)
+        const call = resolveL1Call(req.functionName, req.args as readonly unknown[], route, {
+          zkLighter: LIGHTER_CONTRACT,
+          coreMessaging: L1_CORE_MESSAGING_CONTRACT,
+        })
         update(id, { status: 'signing', message: 'Confirm in your wallet' })
-        const txHash = await writeContractAsync({
-          address: LIGHTER_CONTRACT,
-          abi: lighterAbi,
-          functionName: req.functionName,
-          args: req.args,
-          chainId: mainnet.id,
-        } as Parameters<typeof writeContractAsync>[0])
+        const txHash = await writeContractAsync({ ...call, chainId: mainnet.id } as Parameters<typeof writeContractAsync>[0])
         update(id, { status: 'pending', txHash, message: 'Waiting for Ethereum confirmation' })
         if (!publicClient) throw new Error('no Ethereum client')
         const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })

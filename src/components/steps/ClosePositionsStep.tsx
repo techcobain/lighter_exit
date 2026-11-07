@@ -101,7 +101,7 @@ export function ClosePositionsStep({
         functionName: 'createOrder',
         args: [
           accountIndex,
-          p.marketId,
+          BigInt(p.marketId),
           Number(WHOLE_POSITION),
           Number(price),
           p.isAsk === 1 ? ORDER_SIDE_ASK : ORDER_SIDE_BID,

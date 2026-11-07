@@ -8,6 +8,34 @@ export const LIGHTER_CONTRACT = getAddress(
     '0x3B4D794a66304F130a4Db8F2551B0070dfCf5ca7',
 )
 
+/**
+ * L1CoreMessaging proxy on Ethereum mainnet, which takes over the Priority
+ * Transactions (createOrder, cancelAllOrders, withdraw, changePubKey,
+ * burnShares) from ZkLighter. Implementation 0x15c3FEA3…; never call that directly.
+ */
+export const L1_CORE_MESSAGING_CONTRACT = getAddress(
+  (env.VITE_L1_CORE_MESSAGING_CONTRACT as string | undefined)?.trim() ||
+    '0x183ef7195d443a3dA7EC1d7003BaCa1ff490757D',
+)
+
+/**
+ * The ZkLighter implementation that still exposes the Priority Transactions.
+ * While the proxy points here they go to ZkLighter, otherwise to L1CoreMessaging.
+ */
+export const LEGACY_ZKLIGHTER_IMPL = getAddress(
+  (env.VITE_LEGACY_ZKLIGHTER_IMPL as string | undefined)?.trim() ||
+    '0x45a06c03eedc123c34a66bad4691d7ddb26a80a6',
+)
+
+/** Announced move of the Priority Transactions; only used if the proxy slot cannot be read. */
+export const PRIORITY_CUTOVER_MS = Date.parse('2026-11-08T13:00:00Z')
+
+/** 'auto' (default) follows the ZkLighter upgrade; 'core' or 'legacy' force a route. */
+export const PRIORITY_ROUTE_OVERRIDE = ((env.VITE_PRIORITY_ROUTE as string | undefined)?.trim() || 'auto') as
+  | 'auto'
+  | 'core'
+  | 'legacy'
+
 /** Lighter L2 chain id used when hashing L2 transactions (304 = mainnet). */
 export const LIGHTER_CHAIN_ID = Number(
   (env.VITE_LIGHTER_CHAIN_ID as string | undefined)?.trim() || 304,

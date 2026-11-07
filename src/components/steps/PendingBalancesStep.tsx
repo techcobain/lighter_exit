@@ -9,7 +9,7 @@ import { useAssets } from '../../hooks/useLighterData'
 import { isSamplePreview, previewState } from '../../dev/preview'
 import cn from '../../lib/cn'
 import { LIGHTER_CONTRACT } from '../../lib/config'
-import { lighterAbi } from '../../lib/contract'
+import { zkLighterAbi } from '../../lib/contract'
 import { formatAmount } from '../../lib/format'
 import { BTN_PRIMARY_CLASSNAME, BTN_ROW_CLASSNAME, BTN_SECONDARY_CLASSNAME } from '../../lib/recipes'
 import { fromBaseUnits } from '../../lib/units'
@@ -36,7 +36,7 @@ export function PendingBalancesStep({
   const reads = useReadContracts({
     contracts: assetList.map((a) => ({
       address: LIGHTER_CONTRACT,
-      abi: lighterAbi,
+      abi: zkLighterAbi,
       functionName: 'getPendingBalance' as const,
       args: [address, a.asset_id] as const,
       chainId: mainnet.id,
