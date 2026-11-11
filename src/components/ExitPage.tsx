@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { useAccount } from 'wagmi'
 
-import { useAccountNames, useAccountsByAddress } from '../hooks/useLighterData'
+import { useAccountNames, useAccountsByAddress, useLiveAccounts } from '../hooks/useLighterData'
 import { useSigningKeys } from '../hooks/useSigningKeys'
 import { useWalletGuard } from '../hooks/useWalletGuard'
 import { isPreview } from '../dev/preview'
@@ -91,7 +91,10 @@ function AccountsView({ address }: { address: `0x${string}` }) {
   const canAct = guard.ready || !!guard.wrongChain
   const reason = guard.ready ? null : guard.reason
 
-  const list = useMemo(() => sortAccounts(accounts.data ?? []), [accounts.data])
+  // Order comes from the values at load, so cards don't jump around as accounts
+  // are emptied; what each card shows comes from the refreshed per-account data.
+  const sorted = useMemo(() => sortAccounts(accounts.data ?? []), [accounts.data])
+  const list = useLiveAccounts(sorted)
   useEffect(() => {
     if (list.length > 0 && (selected === null || !list.some((a) => a.index === selected))) {
       setSelected(list[0]!.index)

@@ -1,5 +1,3 @@
-import { useMemo } from 'react'
-
 import cn from '../lib/cn'
 import { ACCOUNT_TYPE } from '../lib/config'
 import { accountTypeLabel, formatUsd } from '../lib/format'
@@ -49,7 +47,6 @@ export function AccountPicker({
   selected: number
   onSelect: (index: number) => void
 }) {
-  const sorted = useMemo(() => sortAccounts(accounts), [accounts])
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -64,7 +61,7 @@ export function AccountPicker({
         </span>
       </div>
       <div className="flex flex-wrap gap-2">
-        {sorted.map((a) => {
+        {accounts.map((a) => {
           const active = a.index === selected
           const busy = accountHasSomething(a)
           const isMain = a.account_type === ACCOUNT_TYPE.MASTER

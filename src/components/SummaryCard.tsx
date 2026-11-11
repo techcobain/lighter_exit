@@ -1,13 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { useQueries } from '@tanstack/react-query'
-
 import { useActions, isInFlight, type ActionState } from '../hooks/useActions'
-import { accountKey, useAssets, useWithdrawalDelay } from '../hooks/useLighterData'
+import { useAssets, useLiveAccounts, useWithdrawalDelay } from '../hooks/useLighterData'
 import cn from '../lib/cn'
 import { UNSTAKE_PERIOD_DAYS } from '../lib/config'
 import { accountTypeLabel, formatAmount, formatCountdown, formatDateTime } from '../lib/format'
-import { fetchAccount } from '../lib/lighterApi'
 import { LABEL_CLASSNAME, PAGE_CRISP_SURFACE_CLASSNAME } from '../lib/recipes'
 import { toMillis } from '../lib/time'
 
@@ -50,15 +47,7 @@ export function SummaryCard({ accounts }: { accounts: DetailedAccount[] }) {
   }, [])
 
   // Fresh copies of every account, so unlocks started this session show up.
-  const fresh = useQueries({
-    queries: accounts.map((a) => ({
-      queryKey: accountKey(a.index),
-      queryFn: () => fetchAccount(a.index),
-      initialData: a,
-      staleTime: 10_000,
-    })),
-  })
-  const liveAccounts = fresh.map((q, i) => q.data ?? accounts[i]!)
+  const liveAccounts = useLiveAccounts(accounts)
 
   const entries = Object.entries(actions).filter(([, s]) => s.status !== 'idle')
   const groups = useMemo(() => {

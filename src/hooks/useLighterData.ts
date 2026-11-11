@@ -59,6 +59,27 @@ export function useLighterAccount(index: number | undefined, initial?: DetailedA
   })
 }
 
+/**
+ * The latest copy of each account, in the order given. The by-address list is
+ * fetched once; actions refresh the per-account queries, so anything that shows
+ * what an account still holds (picker, summary) has to read those.
+ */
+export function useLiveAccounts(accounts: DetailedAccount[]): DetailedAccount[] {
+  const results = useQueries({
+    queries: accounts.map((a) => ({
+      queryKey: accountKey(a.index),
+      queryFn: () => fetchAccount(a.index),
+      initialData: a,
+      staleTime: 10_000,
+    })),
+  })
+  return useMemo(
+    () => results.map((r, i) => r.data ?? accounts[i]!),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [accounts, results.map((r) => r.dataUpdatedAt).join(',')],
+  )
+}
+
 export function useMarkets() {
   return useQuery({
     queryKey: ['markets'],
