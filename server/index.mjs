@@ -19,8 +19,9 @@ import {
   UPSTREAM_RATE_LIMIT_MESSAGE,
   checkProxyRequest,
   clientAddress,
-  isUpstreamRateLimit,
   parseAllowedTxTypes,
+  ROUTE_LIMIT_HEADER,
+  upstreamLimit,
 } from './policy.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -47,9 +48,6 @@ const MAX_BODY_BYTES = envNumber('PROXY_MAX_BODY_BYTES', 256 * 1024)
 const MAX_INFLIGHT = envNumber('PROXY_MAX_INFLIGHT', 200)
 const RATE_BURST = envNumber('PROXY_RATE_BURST', 120)
 const RATE_PER_SEC = envNumber('PROXY_RATE_PER_MIN', 240) / 60
-// After Lighter rate limits this server, stop forwarding to that API for this long:
-// requests sent while it is limiting only keep the limit in place.
-const UPSTREAM_COOLDOWN_MS = envNumber('PROXY_UPSTREAM_COOLDOWN_SEC', 20) * 1000
 // Header the platform's edge sets to the real client address (Railway: X-Real-IP;
 // behind an AWS load balancer: X-Forwarded-For, whose last entry is used).
 // Set to an empty string when nothing trusted sits in front of this server, so
@@ -259,12 +257,13 @@ function readBody(req, limit) {
 }
 
 let inflight = 0
-// Proxy prefix → time until which that upstream is left alone after rate limiting this server.
+// Proxy prefix → time until which that Lighter API is left alone, after it rate limited this server.
+// Requests in the meantime are answered here and never reach Lighter, so they cannot prolong the block.
 const coolingUntil = new Map()
 
 function sendUpstreamLimited(res, prefix) {
   const seconds = Math.max(1, Math.ceil(((coolingUntil.get(prefix) ?? 0) - Date.now()) / 1000))
-  sendJson(res, 429, UPSTREAM_RATE_LIMIT_MESSAGE, { 'retry-after': String(seconds) })
+  sendJson(res, 429, UPSTREAM_RATE_LIMIT_MESSAGE, { 'retry-after': String(seconds), [ROUTE_LIMIT_HEADER]: 'lighter' })
 }
 
 async function proxy(req, res, url, prefix) {
@@ -281,7 +280,7 @@ async function proxy(req, res, url, prefix) {
 
   const wait = rateLimit(clientKey(req))
   if (wait > 0) {
-    sendJson(res, 429, 'Too many requests, slow down.', { 'retry-after': String(wait) })
+    sendJson(res, 429, 'Too many requests, slow down.', { 'retry-after': String(wait), [ROUTE_LIMIT_HEADER]: 'proxy' })
     return
   }
   if (inflight >= MAX_INFLIGHT) {
@@ -336,18 +335,28 @@ async function proxy(req, res, url, prefix) {
       signal: controller.signal,
       redirect: 'manual',
     })
-    if (isUpstreamRateLimit(upstream.status)) {
-      // A challenge page meant for a browser: answer with a plain rate-limit error instead of passing it on.
-      if (Date.now() >= (coolingUntil.get(prefix) ?? 0)) console.warn(`${prefix}: upstream is rate limiting this server, pausing ${UPSTREAM_COOLDOWN_MS / 1000}s`)
-      coolingUntil.set(prefix, Date.now() + UPSTREAM_COOLDOWN_MS)
+    const limit = upstreamLimit(upstream.status, upstreamPath, upstream.headers.get('retry-after'))
+    if (limit?.scope === 'server') {
+      // Lighter is limiting this server's address: pause that API for its cooldown, and answer with a
+      // plain rate-limit error (a 405 body is a challenge page meant for a browser).
+      const until = Date.now() + limit.ms
+      const current = coolingUntil.get(prefix) ?? 0
+      if (until > current) {
+        if (Date.now() >= current) console.warn(`${prefix}: Lighter answered ${upstream.status}, pausing ${Math.round(limit.ms / 1000)}s`)
+        coolingUntil.set(prefix, until)
+      }
       await upstream.body?.cancel().catch(() => {})
       sendUpstreamLimited(res, prefix)
       return
     }
-    res.writeHead(upstream.status, {
+    const passHeaders = {
       'content-type': upstream.headers.get('content-type') ?? 'application/json',
       'cache-control': 'no-store',
-    })
+    }
+    // A sendTx limit on the user's wallet is passed through as Lighter sent it.
+    const retryAfter = upstream.headers.get('retry-after')
+    if (retryAfter) passHeaders['retry-after'] = retryAfter
+    res.writeHead(upstream.status, passHeaders)
     // Streamed rather than buffered, so a large upstream answer never sits in memory.
     if (upstream.body) await pipeline(Readable.fromWeb(upstream.body), res)
     else res.end()

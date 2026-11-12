@@ -2,29 +2,47 @@
 // server. All users share that server's address towards Lighter, so when it is
 // rate limited the browser sends the request straight to Lighter instead, from
 // the user's own address. Kept free of fetch so it can be tested.
+//
+// Cooldowns follow Lighter's docs (developers/reference/rate-limits): a 405 is
+// its firewall blocking the caller for a fixed 60 seconds; a 429 is an API
+// server limit that clears within seconds. Neither route is called again
+// before its cooldown is over.
 
 export interface ApiRouteState {
-  /** Until this time the server route is known to be rate limited, so requests go direct first. */
+  /** Until then the server route is rate limited, so requests go direct first. */
   serverLimitedUntil: number
+  /** Until then Lighter is rate limiting this browser's own address; the direct route is skipped. */
+  directLimitedUntil: number
   /** The browser cannot reach Lighter directly (no network path or a regional block); stop trying. */
   directUnusable: boolean
 }
 
-export const newApiRouteState = (): ApiRouteState => ({ serverLimitedUntil: 0, directUnusable: false })
+export const newApiRouteState = (): ApiRouteState => ({ serverLimitedUntil: 0, directLimitedUntil: 0, directUnusable: false })
 
-/** What is known about a failed attempt: its HTTP status (0 when nothing answered) and any Retry-After. */
+/** What is known about a failed attempt. */
 export interface Failure {
+  /** HTTP status, 0 when nothing answered. */
   httpStatus: number
   retryAfterSec?: number
+  /** The server said its own route is limited, not the user's address (ROUTE_LIMIT_HEADER). */
+  routeLimited?: boolean
 }
 
-const DEFAULT_LIMIT_WINDOW_MS = 20_000
-const MAX_LIMIT_WINDOW_MS = 120_000
+/** Lighter's firewall block after a 405. */
+export const FIREWALL_COOLDOWN_MS = 60_000
+/** After a 429 that gave no Retry-After. */
+export const API_LIMIT_COOLDOWN_MS = 5_000
+const MAX_COOLDOWN_MS = 120_000
 
-/** 429, or the 405 challenge page Lighter's edge answers with when it rate limits the caller. */
-export const isRateLimitStatus = (status: number): boolean => status === 429 || status === 405
 /** The caller cannot use this route at all: nothing answered, or a regional block. */
 const isBlockedStatus = (status: number): boolean => status === 0 || status === 403 || status === 451
+
+const cooldownFor = (failure: Failure): number =>
+  failure.httpStatus === 405
+    ? FIREWALL_COOLDOWN_MS
+    : failure.retryAfterSec && failure.retryAfterSec > 0
+      ? Math.min(failure.retryAfterSec * 1000, MAX_COOLDOWN_MS)
+      : API_LIMIT_COOLDOWN_MS
 
 export async function sendWithDirectFallback<T>(opts: {
   viaServer: () => Promise<T>
@@ -45,7 +63,7 @@ export async function sendWithDirectFallback<T>(opts: {
    * which would send the action to the contract and cost gas.
    */
   const tryDirect = async (): Promise<{ value: T } | undefined> => {
-    if (!opts.direct || state.directUnusable) return undefined
+    if (!opts.direct || state.directUnusable || now() < state.directLimitedUntil) return undefined
     try {
       return { value: await opts.direct() }
     } catch (err) {
@@ -55,12 +73,15 @@ export async function sendWithDirectFallback<T>(opts: {
         state.directUnusable = true
         return undefined
       }
-      if (isRateLimitStatus(failure.httpStatus)) return undefined
+      if (failure.httpStatus === 429 || failure.httpStatus === 405) {
+        state.directLimitedUntil = now() + cooldownFor(failure)
+        return undefined
+      }
       throw err
     }
   }
 
-  // While the server is known to be limited, do not add to its load: go direct first.
+  // While the server route is limited, do not add to its load: go direct first.
   if (now() < state.serverLimitedUntil) {
     const direct = await tryDirect()
     if (direct) return direct.value
@@ -70,9 +91,10 @@ export async function sendWithDirectFallback<T>(opts: {
     return await viaServer()
   } catch (err) {
     const failure = failureOf(err)
-    if (!failure || !isRateLimitStatus(failure.httpStatus)) throw err
-    const wait = failure.retryAfterSec && failure.retryAfterSec > 0 ? failure.retryAfterSec * 1000 : DEFAULT_LIMIT_WINDOW_MS
-    state.serverLimitedUntil = now() + Math.min(wait, MAX_LIMIT_WINDOW_MS)
+    // Only a limit on the server's route is worth retrying from here. A 429 about the user's own
+    // wallet (sendTx is limited per address) would be the same from any address.
+    if (!failure?.routeLimited) throw err
+    state.serverLimitedUntil = now() + cooldownFor(failure)
     const direct = await tryDirect()
     if (direct) return direct.value
     throw err

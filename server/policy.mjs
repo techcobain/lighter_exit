@@ -109,11 +109,43 @@ export function clientAddress(headerValue, remoteAddress) {
   return ip
 }
 
+// Rate limits, per Lighter's docs (developers/reference/rate-limits, "Rate limit
+// exceeding behavior"): an exceeded limit answers 429 or 405. The 405 comes from
+// Lighter's firewall, which blocks the calling address for a fixed 60 seconds.
+// A 429 comes from the API servers, which recover in about one request's worth
+// of budget (weight / (budget / 60) seconds). Reads are limited per IP address,
+// so through this proxy every user shares one allowance. sendTx is not limited
+// per IP at all, only per L1 address: a 429 there is about that user's wallet.
+
+/** How long Lighter's firewall blocks an address after answering 405. */
+export const FIREWALL_COOLDOWN_MS = 60_000
+/** Pause after an API-server 429 that gave no Retry-After; its documented cooldown is shorter. */
+export const API_LIMIT_COOLDOWN_MS = 5_000
+const MAX_COOLDOWN_MS = 120_000
+
 /**
- * Lighter's edge answers 405 with a browser challenge page (not JSON) when it
- * is rate limiting the address a request came from, which here is this
- * server's. The proxy only sends GET to reads and POST to sendTx, so a 405 is
- * never a genuine "method not allowed": it is treated as a rate limit.
+ * Set on a 429 this server sends when its own route to Lighter is limited (or
+ * when this client is over the server's per-client limit), as opposed to a 429
+ * Lighter returned about the user's own wallet. Only the first kind is worth
+ * retrying straight from the browser.
  */
-export const isUpstreamRateLimit = (status) => status === 405
+export const ROUTE_LIMIT_HEADER = 'x-exit-route-limited'
 export const UPSTREAM_RATE_LIMIT_MESSAGE = 'Lighter is rate limiting requests right now. Wait a minute and try again.'
+
+/**
+ * What an upstream answer means for this server's route to that Lighter API.
+ * 'server': the server's address is limited; stop forwarding for `ms`.
+ * 'address': a sendTx limit on the user's wallet; pass the answer through.
+ * null: not a rate limit.
+ *
+ * @param {number} status
+ * @param {string} path upstream path, e.g. /api/v1/sendTx
+ * @param {string | null | undefined} retryAfter the upstream Retry-After header
+ */
+export function upstreamLimit(status, path, retryAfter) {
+  if (status === 405) return { scope: 'server', ms: FIREWALL_COOLDOWN_MS }
+  if (status !== 429) return null
+  if (path === SEND_TX_PATH) return { scope: 'address' }
+  const seconds = Number(retryAfter)
+  return { scope: 'server', ms: Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds * 1000, MAX_COOLDOWN_MS) : API_LIMIT_COOLDOWN_MS }
+}

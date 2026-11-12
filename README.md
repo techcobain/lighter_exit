@@ -37,9 +37,14 @@ also choose contract-only mode. The rule is `DEFAULT_CONTRACT_SCOPE` in
 API requests go through this site's server (`/lighter-api`,
 `/lighter-api-rh`), so Lighter sees the server's address rather than the
 user's. Every user shares that address, and Lighter rate limits it as one
-caller. When the server route answers with a rate limit (429, or Lighter's 405
-challenge page), the browser sends that request straight to Lighter instead and
-keeps doing so until the limit should have lifted (`src/lib/apiFallback.ts`).
+caller. When the server answers that its route is rate limited (a 429 marked
+`x-exit-route-limited`), the browser sends that request straight to Lighter
+instead and keeps doing so until the server's cooldown is over
+(`src/lib/apiFallback.ts`). If Lighter limits the browser's own address too, the
+direct route is skipped for its cooldown (60 seconds after a 405, a few seconds
+after a 429), following Lighter's documented rate-limit behaviour. A 429 about
+the user's own wallet (transactions are limited per address) is not retried
+from anywhere: it would be the same from any address.
 If the browser cannot reach Lighter itself, the user is told to wait; a rate
 limit is never treated as Lighter refusing the account, so it never sends an
 action to the contract.
@@ -97,9 +102,14 @@ extra signature).
   checked fields, with no query string. `PROXY_ALLOWED_TX_TYPES` replaces the
   list (a staging deploy that tests "API first" adds 14 and 16); a malformed
   value stops the server at startup. When Lighter rate limits the server's
-  own address it answers 405 with a browser challenge page; the proxy turns
-  that into a plain 429 and leaves that API alone for
-  `PROXY_UPSTREAM_COOLDOWN_SEC` (20) so the limit can lift. All users share the
+  own address it answers 405 (its firewall, which blocks the address for a
+  fixed 60 seconds) or 429 (its API servers, which recover within seconds).
+  The proxy then stops forwarding to that API for the cooldown, 60 seconds or
+  the upstream Retry-After (5 seconds if none), and answers every request in
+  the meantime itself with a 429 marked `x-exit-route-limited`, so nothing it
+  sends can prolong the block. A 429 on `sendTx` is different: Lighter limits
+  transactions per wallet, not per IP, so it is passed through unchanged and
+  does not pause the server. All users share the
   server's address towards Lighter, so one heavy client can cause this for
   everyone; meanwhile browsers call Lighter directly, which the
   Content-Security-Policy allows for Lighter's two API origins only. The proxy is also rate limited per client

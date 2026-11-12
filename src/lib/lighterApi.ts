@@ -1,4 +1,6 @@
 import { isPreview, isSamplePreview, previewAccountList, previewAssets, previewMarkets, previewNames, previewPools, previewState, PREVIEW_PUBLIC_KEY } from '../dev/preview'
+import { ROUTE_LIMIT_HEADER } from '../../server/policy.mjs'
+
 import { newApiRouteState, sendWithDirectFallback, type ApiRouteState } from './apiFallback'
 import { API_KEY_INDEX, RESTRICTION_ERROR_CODES } from './config'
 import { activeEnvironment, type EnvironmentId, type LighterEnvironment } from './environments'
@@ -18,8 +20,7 @@ export class LighterApiError extends Error {
     message: string,
     public readonly code: number,
     public readonly httpStatus: number,
-    /** Seconds the server asked to wait, when it said. */
-    public readonly retryAfterSec?: number,
+    public readonly limit: { retryAfterSec?: number; routeLimited?: boolean } = {},
   ) {
     super(message)
     this.name = 'LighterApiError'
@@ -43,8 +44,9 @@ async function send<T>(base: string, path: string, init?: RequestInit): Promise<
   }
   const retryAfter = Number(res.headers.get('retry-after'))
   const retryAfterSec = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined
-  // Lighter's edge answers 405 with a browser challenge page when it is rate limiting the caller.
-  if (res.status === 405) throw new LighterApiError(RATE_LIMITED_MESSAGE, 429, 429, retryAfterSec)
+  const limit = { retryAfterSec, routeLimited: res.headers.has(ROUTE_LIMIT_HEADER) }
+  // Lighter's firewall answers 405 with a browser challenge page when it is rate limiting the caller.
+  if (res.status === 405) throw new LighterApiError(RATE_LIMITED_MESSAGE, 429, 405, limit)
   const text = await res.text()
   let body: unknown = null
   try {
@@ -56,7 +58,7 @@ async function send<T>(base: string, path: string, init?: RequestInit): Promise<
   const code = typeof obj.code === 'number' ? obj.code : res.ok ? 200 : res.status
   if (!res.ok || (code !== 200 && code !== 0)) {
     const message = obj.message || (text ? text.slice(0, 200) : `HTTP ${res.status}`)
-    throw new LighterApiError(message, code, res.status, retryAfterSec)
+    throw new LighterApiError(message, code, res.status, limit)
   }
   return body as T
 }
@@ -77,7 +79,7 @@ async function request<T>(path: string, init?: RequestInit, env: LighterEnvironm
     viaServer: () => send<T>(env.apiBase, path, init),
     direct: direct ? () => send<T>(direct, path, init) : null,
     state,
-    failureOf: (err) => (err instanceof LighterApiError ? { httpStatus: err.httpStatus, retryAfterSec: err.retryAfterSec } : null),
+    failureOf: (err) => (err instanceof LighterApiError ? { httpStatus: err.httpStatus, ...err.limit } : null),
   })
 }
 

@@ -5,8 +5,8 @@ import {
   DEFAULT_ALLOWED_TX_TYPES,
   checkProxyRequest,
   clientAddress,
-  isUpstreamRateLimit,
   parseAllowedTxTypes,
+  upstreamLimit,
 } from '../server/policy.mjs'
 import { TX_TYPE } from '../src/lib/config'
 
@@ -114,9 +114,24 @@ describe('clientAddress', () => {
   })
 })
 
-describe('isUpstreamRateLimit', () => {
-  it('reads a 405 from Lighter as a rate limit and nothing else', () => {
-    expect(isUpstreamRateLimit(405)).toBe(true)
-    for (const status of [200, 400, 403, 404, 429, 451, 500, 502]) expect(isUpstreamRateLimit(status)).toBe(false)
+describe('upstreamLimit', () => {
+  it("pauses for Lighter's documented 60-second firewall block after a 405, on any endpoint", () => {
+    expect(upstreamLimit(405, '/api/v1/account', null)).toEqual({ scope: 'server', ms: 60_000 })
+    expect(upstreamLimit(405, '/api/v1/sendTx', '5')).toEqual({ scope: 'server', ms: 60_000 })
+  })
+
+  it('pauses reads after a 429 for the Retry-After, or briefly without one', () => {
+    expect(upstreamLimit(429, '/api/v1/account', '12')).toEqual({ scope: 'server', ms: 12_000 })
+    expect(upstreamLimit(429, '/api/v1/nextNonce', null)).toEqual({ scope: 'server', ms: 5_000 })
+    expect(upstreamLimit(429, '/api/v1/account', 'soon')).toEqual({ scope: 'server', ms: 5_000 })
+    expect(upstreamLimit(429, '/api/v1/account', '9999')).toEqual({ scope: 'server', ms: 120_000 })
+  })
+
+  it('leaves a sendTx 429 to the user: transactions are limited per wallet, not per IP', () => {
+    expect(upstreamLimit(429, '/api/v1/sendTx', '3')).toEqual({ scope: 'address' })
+  })
+
+  it('ignores every other status', () => {
+    for (const status of [200, 400, 403, 404, 451, 500, 502]) expect(upstreamLimit(status, '/api/v1/account', null)).toBeNull()
   })
 })

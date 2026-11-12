@@ -8,13 +8,20 @@ class Fail extends Error {
   }
 }
 const failureOf = (err: unknown) => (err instanceof Fail ? err.failure : null)
-const fail = (httpStatus: number, retryAfterSec?: number) => () => Promise.reject(new Fail({ httpStatus, retryAfterSec }))
+const fail = (failure: Failure) => () => Promise.reject(new Fail(failure))
+/** The server saying its own route to Lighter is limited. */
+const routeLimited = (retryAfterSec?: number) => fail({ httpStatus: 429, routeLimited: true, retryAfterSec })
 const ok = (value: string) => () => Promise.resolve(value)
 
 /** Wraps a sender so the test can count how often each route was used. */
 function counted<T>(fn: () => Promise<T>) {
   const wrapped = Object.assign(() => (wrapped.calls++, fn()), { calls: 0 })
   return wrapped
+}
+
+function clock(start = 1_000) {
+  const c = { time: start, now: () => c.time }
+  return c
 }
 
 describe('sendWithDirectFallback', () => {
@@ -25,48 +32,78 @@ describe('sendWithDirectFallback', () => {
     expect(direct.calls).toBe(0)
   })
 
-  it('goes direct when the server is rate limited, by 429 or by the 405 challenge', async () => {
-    for (const status of [429, 405]) {
-      const state = newApiRouteState()
-      expect(await sendWithDirectFallback({ viaServer: fail(status), direct: ok('direct'), state, failureOf })).toBe('direct')
-    }
+  it('goes direct when the server says its route is limited', async () => {
+    const state = newApiRouteState()
+    expect(await sendWithDirectFallback({ viaServer: routeLimited(60), direct: ok('direct'), state, failureOf })).toBe('direct')
   })
 
-  it('keeps going direct, without asking the server, until the limit should have lifted', async () => {
-    let time = 1_000
-    const now = () => time
+  it("does not retry a 429 about the user's own wallet anywhere", async () => {
+    const direct = counted(ok('direct'))
     const state = newApiRouteState()
-    const server = counted(fail(429, 30))
-    await sendWithDirectFallback({ viaServer: server, direct: ok('direct'), state, failureOf, now })
+    await expect(sendWithDirectFallback({ viaServer: fail({ httpStatus: 429 }), direct, state, failureOf })).rejects.toMatchObject({ failure: { httpStatus: 429 } })
+    expect(direct.calls).toBe(0)
+    expect(state.serverLimitedUntil).toBe(0)
+  })
+
+  it("keeps going direct, without asking the server, for the server's cooldown", async () => {
+    const c = clock()
+    const state = newApiRouteState()
+    const server = counted(routeLimited(30))
+    await sendWithDirectFallback({ viaServer: server, direct: ok('direct'), state, failureOf, now: c.now })
     expect(server.calls).toBe(1)
 
-    time += 29_000
+    c.time += 29_000
     const again = counted(ok('server'))
-    expect(await sendWithDirectFallback({ viaServer: again, direct: ok('direct'), state, failureOf, now })).toBe('direct')
+    expect(await sendWithDirectFallback({ viaServer: again, direct: ok('direct'), state, failureOf, now: c.now })).toBe('direct')
     expect(again.calls).toBe(0)
 
-    time += 2_000
-    expect(await sendWithDirectFallback({ viaServer: again, direct: ok('direct'), state, failureOf, now })).toBe('server')
+    c.time += 2_000
+    expect(await sendWithDirectFallback({ viaServer: again, direct: ok('direct'), state, failureOf, now: c.now })).toBe('server')
     expect(again.calls).toBe(1)
   })
 
-  it('does not go direct for anything that is not a rate limit', async () => {
-    for (const status of [0, 400, 403, 404, 451, 500, 502]) {
+  it('does not go direct for anything that is not a route limit', async () => {
+    for (const httpStatus of [0, 400, 403, 404, 405, 451, 500, 502]) {
       const direct = counted(ok('direct'))
       const state = newApiRouteState()
-      await expect(sendWithDirectFallback({ viaServer: fail(status), direct, state, failureOf })).rejects.toMatchObject({ failure: { httpStatus: status } })
+      await expect(sendWithDirectFallback({ viaServer: fail({ httpStatus }), direct, state, failureOf })).rejects.toMatchObject({ failure: { httpStatus } })
       expect(direct.calls).toBe(0)
     }
   })
 
+  it("leaves the direct route alone for Lighter's 60-second firewall block after a 405", async () => {
+    const c = clock()
+    const state = newApiRouteState()
+    const direct = counted(fail({ httpStatus: 405 }))
+    await expect(sendWithDirectFallback({ viaServer: routeLimited(1), direct, state, failureOf, now: c.now })).rejects.toMatchObject({ failure: { httpStatus: 429 } })
+    expect(direct.calls).toBe(1)
+
+    c.time += 59_000
+    await expect(sendWithDirectFallback({ viaServer: routeLimited(1), direct, state, failureOf, now: c.now })).rejects.toMatchObject({ failure: { httpStatus: 429 } })
+    expect(direct.calls).toBe(1)
+
+    c.time += 2_000
+    await expect(sendWithDirectFallback({ viaServer: routeLimited(1), direct, state, failureOf, now: c.now })).rejects.toThrow()
+    expect(direct.calls).toBe(2)
+  })
+
+  it('leaves the direct route alone briefly after a 429 from Lighter', async () => {
+    const c = clock()
+    const state = newApiRouteState()
+    const direct = counted(fail({ httpStatus: 429 }))
+    await expect(sendWithDirectFallback({ viaServer: routeLimited(60), direct, state, failureOf, now: c.now })).rejects.toThrow()
+    expect(state.directLimitedUntil).toBe(c.time + 5_000)
+    expect(state.directUnusable).toBe(false)
+  })
+
   it('reports the rate limit, never a refusal, when the direct route is blocked for this user', async () => {
-    for (const blocked of [0, 403, 451]) {
+    for (const httpStatus of [0, 403, 451]) {
       const state = newApiRouteState()
-      const direct = counted(fail(blocked))
-      await expect(sendWithDirectFallback({ viaServer: fail(429), direct, state, failureOf })).rejects.toMatchObject({ failure: { httpStatus: 429 } })
+      const direct = counted(fail({ httpStatus }))
+      await expect(sendWithDirectFallback({ viaServer: routeLimited(60), direct, state, failureOf })).rejects.toMatchObject({ failure: { httpStatus: 429, routeLimited: true } })
       expect(state.directUnusable).toBe(true)
       // Later requests do not try the blocked route again.
-      await expect(sendWithDirectFallback({ viaServer: fail(429), direct, state, failureOf })).rejects.toMatchObject({ failure: { httpStatus: 429 } })
+      await expect(sendWithDirectFallback({ viaServer: routeLimited(60), direct, state, failureOf })).rejects.toMatchObject({ failure: { httpStatus: 429 } })
       expect(direct.calls).toBe(1)
     }
   })
@@ -75,26 +112,19 @@ describe('sendWithDirectFallback', () => {
     const state = newApiRouteState()
     state.serverLimitedUntil = 10_000
     const server = counted(ok('server'))
-    expect(await sendWithDirectFallback({ viaServer: server, direct: fail(0), state, failureOf, now: () => 0 })).toBe('server')
+    expect(await sendWithDirectFallback({ viaServer: server, direct: fail({ httpStatus: 0 }), state, failureOf, now: () => 0 })).toBe('server')
     expect(server.calls).toBe(1)
     expect(state.directUnusable).toBe(true)
   })
 
-  it('reports the rate limit when both routes are rate limited, and tries direct again later', async () => {
-    const state = newApiRouteState()
-    const direct = counted(fail(405))
-    await expect(sendWithDirectFallback({ viaServer: fail(429), direct, state, failureOf })).rejects.toMatchObject({ failure: { httpStatus: 429 } })
-    expect(state.directUnusable).toBe(false)
-  })
-
   it("passes on Lighter's own answer from the direct route", async () => {
     const state = newApiRouteState()
-    await expect(sendWithDirectFallback({ viaServer: fail(429), direct: fail(400), state, failureOf })).rejects.toMatchObject({ failure: { httpStatus: 400 } })
+    await expect(sendWithDirectFallback({ viaServer: routeLimited(60), direct: fail({ httpStatus: 400 }), state, failureOf })).rejects.toMatchObject({ failure: { httpStatus: 400 } })
     expect(state.directUnusable).toBe(false)
   })
 
   it('reports the rate limit when there is no direct route', async () => {
     const state = newApiRouteState()
-    await expect(sendWithDirectFallback({ viaServer: fail(429), direct: null, state, failureOf })).rejects.toMatchObject({ failure: { httpStatus: 429 } })
+    await expect(sendWithDirectFallback({ viaServer: routeLimited(60), direct: null, state, failureOf })).rejects.toMatchObject({ failure: { httpStatus: 429 } })
   })
 })
