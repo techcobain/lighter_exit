@@ -149,6 +149,30 @@ repo; Railway builds the image, sets `PORT`, and probes `/healthz`. Pass any
 `VITE_*` values as build args or service variables. Pick a region that is not
 restricted by Lighter, since the proxy's egress IP is what the API sees.
 
+## Deploy on AWS Lightsail
+
+The same image also runs on a Lightsail container service (`lighter-exit`,
+Tokyo, smallest size). Nothing in the code differs; only how it gets there.
+
+1. A push to `prod` runs `.github/workflows/image.yml`: typecheck, unit tests,
+   image build, a smoke test of the container (health, page, and that the proxy
+   refuses orders), then publishes `ghcr.io/techcobain/lighter_exit:<commit sha>`.
+   The package must be public so Lightsail can pull it.
+2. Deploying is a separate, manual step, so nothing reaches customers without a
+   person choosing the commit:
+
+   ```bash
+   AWS_PROFILE=<profile> scripts/deploy-lightsail.sh <commit sha>
+   ```
+
+   The script sets `CLIENT_IP_HEADER=x-forwarded-for`: Lightsail's load balancer
+   appends the client address to that header and the server rate limits by its
+   last entry.
+
+No AWS credentials are stored in GitHub. As on Railway, the region must be one
+Lighter does not restrict, since the server's outbound address is what the API
+sees.
+
 ## Making changes
 
 Read this before changing how the page behaves. Several rules live in more
@@ -158,6 +182,8 @@ than one place and have to move together.
 
 - `main` deploys to Railway automatically: the `production` environment on its
   Railway domain, and `staging`, which also shows the routing test switch.
+- A push to `prod` also publishes the container image for AWS Lightsail; it is
+  deployed there by hand (see "Deploy on AWS Lightsail").
 - `prod` is the customer-facing site at `exit.lighter.xyz`. Build it with no
   `VITE_FORCE_L1_OPTION` and no `PROXY_ALLOWED_TX_TYPES`.
 - Keep the two on the same commit. Work on `main`, run `npm run check`, try it

@@ -12,7 +12,7 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
 
-import { ALLOWED_READS, SEND_TX_PATH, checkProxyRequest, parseAllowedTxTypes } from './policy.mjs'
+import { ALLOWED_READS, SEND_TX_PATH, checkProxyRequest, clientAddress, parseAllowedTxTypes } from './policy.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DIST = path.resolve(__dirname, '..', 'dist')
@@ -38,7 +38,8 @@ const MAX_BODY_BYTES = envNumber('PROXY_MAX_BODY_BYTES', 256 * 1024)
 const MAX_INFLIGHT = envNumber('PROXY_MAX_INFLIGHT', 200)
 const RATE_BURST = envNumber('PROXY_RATE_BURST', 120)
 const RATE_PER_SEC = envNumber('PROXY_RATE_PER_MIN', 240) / 60
-// Header the platform's edge sets to the real client address (Railway: X-Real-IP).
+// Header the platform's edge sets to the real client address (Railway: X-Real-IP;
+// behind an AWS load balancer: X-Forwarded-For, whose last entry is used).
 // Set to an empty string when nothing trusted sits in front of this server, so
 // clients cannot pick their own rate-limit bucket.
 const CLIENT_IP_HEADER = (process.env.CLIENT_IP_HEADER ?? 'x-real-ip').trim().toLowerCase()
@@ -191,13 +192,7 @@ function sendJson(res, status, message, extraHeaders = {}) {
 }
 
 function clientKey(req) {
-  const header = CLIENT_IP_HEADER ? req.headers[CLIENT_IP_HEADER] : undefined
-  const fromHeader = (Array.isArray(header) ? header[0] : header)?.split(',')[0]?.trim()
-  let ip = fromHeader || req.socket.remoteAddress || 'unknown'
-  if (ip.startsWith('::ffff:')) ip = ip.slice(7)
-  // One IPv6 subscriber usually holds a whole /64, so limit by prefix.
-  if (ip.includes(':')) ip = ip.split(':').slice(0, 4).join(':')
-  return ip
+  return clientAddress(CLIENT_IP_HEADER ? req.headers[CLIENT_IP_HEADER] : undefined, req.socket.remoteAddress)
 }
 
 // Token bucket per client address: RATE_BURST requests at once, refilled at RATE_PER_SEC.

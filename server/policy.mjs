@@ -82,3 +82,23 @@ export function checkProxyRequest(req, allowedTxTypes) {
     contentType: 'application/x-www-form-urlencoded',
   }
 }
+
+/**
+ * The address a request is rate limited by. `headerValue` is what the trusted
+ * proxy in front of this server put in its client-address header. The LAST
+ * entry is used: a load balancer appends the address it saw to whatever the
+ * client sent (X-Forwarded-For), so earlier entries can be forged. A
+ * single-valued header (Railway's X-Real-IP) reads the same either way.
+ *
+ * @param {string | string[] | undefined} headerValue
+ * @param {string | undefined} remoteAddress
+ */
+export function clientAddress(headerValue, remoteAddress) {
+  const joined = Array.isArray(headerValue) ? headerValue.join(',') : (headerValue ?? '')
+  const fromHeader = joined.split(',').map((v) => v.trim()).filter(Boolean).pop()
+  let ip = fromHeader || remoteAddress || 'unknown'
+  if (ip.startsWith('::ffff:')) ip = ip.slice(7)
+  // One IPv6 subscriber usually holds a whole /64, so limit by prefix.
+  if (ip.includes(':')) ip = ip.split(':').slice(0, 4).join(':')
+  return ip
+}

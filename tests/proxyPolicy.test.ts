@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { ALLOWED_READS, DEFAULT_ALLOWED_TX_TYPES, checkProxyRequest, parseAllowedTxTypes } from '../server/policy.mjs'
+import { ALLOWED_READS, DEFAULT_ALLOWED_TX_TYPES, checkProxyRequest, clientAddress, parseAllowedTxTypes } from '../server/policy.mjs'
 import { TX_TYPE } from '../src/lib/config'
 
 const allowed = parseAllowedTxTypes(undefined)
@@ -83,5 +83,26 @@ describe('proxy policy', () => {
     expect([...parseAllowedTxTypes('')].sort((a, b) => a - b)).toEqual([...DEFAULT_ALLOWED_TX_TYPES].sort((a, b) => a - b))
     expect(() => parseAllowedTxTypes('8,orders')).toThrow()
     expect(() => parseAllowedTxTypes('8,,13')).toThrow()
+  })
+})
+
+describe('clientAddress', () => {
+  it('reads a single-valued header as is', () => {
+    expect(clientAddress('203.0.113.7', '10.0.0.1')).toBe('203.0.113.7')
+  })
+
+  it('takes the entry the load balancer appended, not one the client sent', () => {
+    expect(clientAddress('1.2.3.4, 203.0.113.7', '10.0.0.1')).toBe('203.0.113.7')
+    expect(clientAddress(['1.2.3.4', '5.6.7.8, 203.0.113.7'], '10.0.0.1')).toBe('203.0.113.7')
+    expect(clientAddress('1.2.3.4, 203.0.113.7, ', '10.0.0.1')).toBe('203.0.113.7')
+  })
+
+  it('falls back to the socket address when the header is missing', () => {
+    expect(clientAddress(undefined, '::ffff:10.0.0.1')).toBe('10.0.0.1')
+    expect(clientAddress('', undefined)).toBe('unknown')
+  })
+
+  it('groups IPv6 clients by /64', () => {
+    expect(clientAddress('2001:db8:1:2:3:4:5:6', undefined)).toBe('2001:db8:1:2')
   })
 })

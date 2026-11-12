@@ -2,6 +2,7 @@ export const ALLOWED_READS: Map<string, { auth: boolean }>
 export const SEND_TX_PATH: string
 export const DEFAULT_ALLOWED_TX_TYPES: number[]
 export function parseAllowedTxTypes(value: string | undefined): Set<number>
+export function clientAddress(headerValue: string | string[] | undefined, remoteAddress: string | undefined): string
 export type ProxyDecision =
   | { ok: true; search: string; forwardAuth: boolean; body?: string; contentType?: string }
   | { ok: false; status: number; message: string }

@@ -1,0 +1,66 @@
+# Builds the container image for the customer-facing site and publishes it to
+# GitHub's container registry, where the AWS Lightsail service pulls it from.
+# It does not deploy: that is scripts/deploy-lightsail.sh, run by a person.
+name: Container image
+
+on:
+  push:
+    branches: [prod]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Typecheck and unit tests
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+
+      # No build args: production uses the defaults. In particular the routing
+      # test switch and the proxy override stay off (README, "Making changes").
+      - name: Build image
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:prod" .
+
+      - name: Smoke test
+        run: |
+          docker run -d --name site -p 8787:8787 "$IMAGE:$GITHUB_SHA"
+          for i in $(seq 1 20); do curl -fsS http://localhost:8787/healthz && break; sleep 1; done
+          curl -fsS http://localhost:8787/ | grep -q '<div id="root">'
+          # Orders must be refused by the proxy itself, before reaching Lighter.
+          for type in 14 16; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -d "tx_type=${type}&tx_info={}" http://localhost:8787/lighter-api/api/v1/sendTx)
+            test "$code" = 403 || { echo "tx type $type answered $code, expected 403"; exit 1; }
+          done
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8787/lighter-api/api/v1/orderBooks)
+          test "$code" = 404 || { echo "unlisted read answered $code, expected 404"; exit 1; }
+          docker rm -f site
+
+      - name: Publish
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push "$IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE:prod"
+          echo "Published \`$IMAGE:$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
