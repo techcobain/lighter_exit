@@ -1,7 +1,8 @@
 // Runs one exit action. The API route is always tried first (an L2
 // transaction signed with the account's derived key, free and instant); the
-// Ethereum contract route is used only when the API refuses the account, or
-// when the user opted into Ethereum-only mode.
+// L1 contract route (Ethereum, or Robinhood Chain for Lighter RH) is used only
+// when the API refuses the account, when the user opted into contract-only
+// mode, or when the testing switch forces contract calls (see chooseRoute).
 
 import { useCallback } from 'react'
 
@@ -11,8 +12,11 @@ import { isPreview, previewApply } from '../dev/preview'
 import { API_KEY_INDEX } from '../lib/config'
 import { describeError } from '../lib/format'
 import { fetchNextNonce, fetchTxByHash, isExecuted, isRestrictionError, l2ExecutionError, sendTx } from '../lib/lighterApi'
+import { chooseRoute, forcesL1 } from '../lib/route'
 
 import { useActions } from './useActions'
+import { useEnvironment } from './useEnvironment'
+import { useForceL1Scope } from './useForceL1'
 import { useL1Action, type L1ActionRequest } from './useL1Action'
 import { useSigningKeys } from './useSigningKeys'
 
@@ -23,6 +27,8 @@ export interface ExitActionRequest {
   label: string
   /** Account whose key signs the API transaction. */
   accountIndex: number
+  /** Places or cancels orders. The testing switch can send just these to the contract. */
+  trading?: boolean
   l2?: { txType: number; sign: (nonce: number) => Promise<SignedTx> }
   /** Contract fallback; omit for actions that only exist on L2 (unstake, freeze). */
   l1?: L1ActionRequest
@@ -35,8 +41,10 @@ const L2_RESULT_TIMEOUT_MS = 45_000
 export function useExitAction() {
   const { update } = useActions()
   const { keys, mode } = useSigningKeys()
+  const forceScope = useForceL1Scope()
   const { run: runL1 } = useL1Action()
   const queryClient = useQueryClient()
+  const l1 = useEnvironment().l1Name
 
   const invalidate = useCallback(
     (keysToInvalidate?: readonly (readonly unknown[])[]) => {
@@ -45,16 +53,17 @@ export function useExitAction() {
     [queryClient],
   )
 
-  /** Resolves true when the action succeeded (or, for L1, confirmed on Ethereum). */
+  /** Resolves true when the action succeeded (or, for L1, confirmed on the L1 chain). */
   const run = useCallback(
     async (req: ExitActionRequest): Promise<boolean> => {
       const { id, label } = req
+      const forceL1 = forcesL1(forceScope, !!req.trading)
       if (isPreview) {
-        const route = mode === 'api' && req.l2 ? 'api' : 'l1'
+        const route = chooseRoute({ mode, forceL1, hasL2: !!req.l2, hasL1: !!req.l1, keyReady: true }) === 'api' ? 'api' : 'l1'
         const steps: [Parameters<typeof update>[1]['status'], string][] =
           route === 'api'
             ? [['preparing', ''], ['signing', 'Signing with the derived key'], ['l2-waiting', 'Accepted by Lighter, waiting for execution']]
-            : [['signing', 'Confirm in your wallet'], ['pending', 'Waiting for Ethereum confirmation'], ['l2-waiting', 'Confirmed on Ethereum. Lighter usually executes within ~2 minutes']]
+            : [['signing', 'Confirm in your wallet'], ['pending', `Waiting for ${l1} confirmation`], ['l2-waiting', `Confirmed on ${l1}. Lighter usually executes within ~2 minutes`]]
         update(id, { status: 'preparing', label, route, message: undefined, txHash: undefined, l2Hash: undefined })
         for (const [status, message] of steps) {
           await sleep(650)
@@ -66,19 +75,21 @@ export function useExitAction() {
         invalidate(req.invalidate)
         return true
       }
-      const keyReady = keys[req.accountIndex]?.stage === 'registered'
-      const viaApi = mode === 'api' && !!req.l2 && keyReady
-
-      if (!viaApi) {
-        if (!req.l1) {
-          update(id, {
-            status: 'error',
-            label,
-            message: keyReady ? 'This action is only available through the API.' : 'Unlock API signing for this account first.',
-          })
-          return false
-        }
-        return runL1(req.l1)
+      const route = chooseRoute({
+        mode,
+        forceL1,
+        hasL2: !!req.l2,
+        hasL1: !!req.l1,
+        keyReady: keys[req.accountIndex]?.stage === 'registered',
+      })
+      if (route === 'l1') return runL1(req.l1!)
+      if (route !== 'api') {
+        update(id, {
+          status: 'error',
+          label,
+          message: route === 'api-only' ? 'This action is only available through the API.' : 'Unlock API signing for this account first.',
+        })
+        return false
       }
 
       update(id, { status: 'preparing', label, route: 'api', message: undefined, txHash: undefined, l2Hash: undefined })
@@ -107,7 +118,7 @@ export function useExitAction() {
         return true
       } catch (err) {
         if (isRestrictionError(err) && req.l1) {
-          update(id, { status: 'preparing', route: 'l1', message: 'The API refused this account; sending through the Ethereum contract instead' })
+          update(id, { status: 'preparing', route: 'l1', message: `The API refused this account; sending through the ${l1} contract instead` })
           await sleep(600)
           return runL1(req.l1)
         }
@@ -115,7 +126,7 @@ export function useExitAction() {
         return false
       }
     },
-    [invalidate, keys, mode, runL1, update],
+    [forceScope, invalidate, keys, l1, mode, runL1, update],
   )
 
   /** Runs requests one after another; stops at the first failure. */

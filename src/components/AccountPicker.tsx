@@ -1,3 +1,5 @@
+import { type ReactNode } from 'react'
+
 import cn from '../lib/cn'
 import { ACCOUNT_TYPE } from '../lib/config'
 import { accountTypeLabel, formatUsd } from '../lib/format'
@@ -40,17 +42,23 @@ export function AccountPicker({
   namesPending,
   selected,
   onSelect,
+  tag,
 }: {
   accounts: DetailedAccount[]
   names?: Map<number, string>
   namesPending?: boolean
   selected: number
   onSelect: (index: number) => void
+  /** Deployment tag, when the page is not showing the deployment switch. */
+  tag?: ReactNode
 }) {
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className={LABEL_CLASSNAME}>{accounts.length} Lighter accounts under this address</span>
+    <div className="flex flex-col gap-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+          {tag}
+          <span className={LABEL_CLASSNAME}>{accounts.length} accounts under this address</span>
+        </span>
         <span className="flex items-center gap-3 text-2xs text-faint">
           <span className="flex items-center gap-1.5">
             <span className="size-1.5 rounded-full bg-warn" /> still holds something
@@ -60,35 +68,37 @@ export function AccountPicker({
           </span>
         </span>
       </div>
-      <div className="flex flex-wrap gap-2">
+      {/* Equal-width tiles, like the deployment switch, so any number of accounts fills tidy rows. */}
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">
         {accounts.map((a) => {
           const active = a.index === selected
           const busy = accountHasSomething(a)
           const isMain = a.account_type === ACCOUNT_TYPE.MASTER
           const name = accountDisplayName(a, names)
+          const value = operatorValue(a)
+          const depositors = a.account_type === ACCOUNT_TYPE.PUBLIC_POOL && value.depositors > 0.005 ? value.depositors : 0
           return (
             <button
               key={a.index}
               type="button"
               onClick={() => onSelect(a.index)}
+              title={depositors > 0 ? `Your share ${formatUsd(value.yours)}; depositors hold another ${formatUsd(depositors)}` : undefined}
               className={cn(
-                'flex items-center gap-2.5 rounded-modal border-[0.5px] px-3 py-2 text-left transition-colors',
+                'flex min-w-0 items-start gap-2.5 rounded-modal border-[0.5px] px-3 py-2 text-left transition-colors',
                 active ? 'border-ink/30 bg-ink/10 text-ink' : 'border-line bg-fill text-dim hover:bg-ink/6 hover:text-ink',
               )}
             >
-              <span className={cn('size-1.5 shrink-0 rounded-full', busy ? 'bg-warn' : 'bg-success')} aria-hidden />
-              <span className="flex flex-col">
-                <span className="text-sm font-medium">
+              <span className={cn('mt-1.5 size-1.5 shrink-0 rounded-full', busy ? 'bg-warn' : 'bg-success')} aria-hidden />
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="truncate text-sm font-medium">
                   {name}
                   {!isMain && name !== accountTypeLabel(a.account_type) && (
                     <span className="ml-1.5 text-2xs font-normal text-meta">{accountTypeLabel(a.account_type)}</span>
                   )}
                 </span>
-                <span className="font-mono text-2xs text-meta">
-                  #{a.index} · {formatUsd(operatorValue(a).yours)}
-                  {a.account_type === ACCOUNT_TYPE.PUBLIC_POOL && operatorValue(a).depositors > 0.005 && (
-                    <span className="text-faint"> · {formatUsd(operatorValue(a).depositors)} depositors&apos;</span>
-                  )}
+                <span className="flex items-baseline justify-between gap-3 font-mono text-2xs text-meta">
+                  <span className="truncate">#{a.index}</span>
+                  <span className={cn('shrink-0 tabular-nums', active && 'text-ink')}>{formatUsd(value.yours)}</span>
                 </span>
               </span>
             </button>

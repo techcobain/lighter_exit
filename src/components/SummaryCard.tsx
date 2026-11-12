@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 
+import { useEnvironment } from '../hooks/useEnvironment'
 import { useActions, isInFlight, type ActionState } from '../hooks/useActions'
 import { useAssets, useLiveAccounts, useWithdrawalDelay } from '../hooks/useLighterData'
 import cn from '../lib/cn'
 import { UNSTAKE_PERIOD_DAYS } from '../lib/config'
 import { accountTypeLabel, formatAmount, formatCountdown, formatDateTime } from '../lib/format'
-import { LABEL_CLASSNAME, PAGE_CRISP_SURFACE_CLASSNAME } from '../lib/recipes'
+import { LABEL_CLASSNAME, PAGE_CRISP_SURFACE_CLASSNAME, PROSE_CLASSNAME } from '../lib/recipes'
 import { toMillis } from '../lib/time'
 
 import { ActionLine } from './ActionStatus'
@@ -21,7 +22,7 @@ const KIND_LABEL: Record<string, string> = {
   unstake: 'Unstake requests',
   mv: 'Moved to main account',
   wd: 'Withdrawals',
-  claim: 'Ethereum claims',
+  claim: 'Contract claims',
   freeze: 'Pool freezes',
   opburn: 'Operator share burns',
   sweep: 'Pool leftovers moved',
@@ -38,6 +39,7 @@ function kindOf(id: string, state: ActionState): string {
 
 export function SummaryCard({ accounts }: { accounts: DetailedAccount[] }) {
   const { actions } = useActions()
+  const l1 = useEnvironment().l1Name
   const delay = useWithdrawalDelay()
   const assets = useAssets()
   const [now, setNow] = useState(Date.now())
@@ -71,10 +73,10 @@ export function SummaryCard({ accounts }: { accounts: DetailedAccount[] }) {
   const nothing = entries.length === 0 && unlocks.length === 0
 
   return (
-    <section className={cn(PAGE_CRISP_SURFACE_CLASSNAME, 'flex flex-col gap-5 rounded-panel p-6')}>
+    <section className={cn(PAGE_CRISP_SURFACE_CLASSNAME, 'flex flex-col gap-5 rounded-panel p-6 max-mobile:p-4')}>
       <div className="flex flex-col gap-1.5">
         <h2 className="text-xl font-medium tracking-heading text-ink">Summary</h2>
-        <p className="max-w-[60ch] text-sm leading-md text-dim">
+        <p className={cn(PROSE_CLASSNAME, 'text-sm leading-md text-dim')}>
           Everything processed in this session, and what still has to happen on Lighter&apos;s side before your funds are in your wallet.
         </p>
       </div>
@@ -103,7 +105,7 @@ export function SummaryCard({ accounts }: { accounts: DetailedAccount[] }) {
                         {busy > 0 && <span className="ml-2 text-link">{busy} in progress</span>}
                         {bad > 0 && <span className="ml-2 text-danger">{bad} failed</span>}
                         <span className="ml-2">
-                          {viaApi === items.length ? 'via API' : viaApi === 0 ? 'via Ethereum' : 'API + Ethereum'}
+                          {viaApi === items.length ? 'via API' : viaApi === 0 ? `via ${l1}` : `API + ${l1}`}
                         </span>
                       </span>
                     </div>
@@ -124,7 +126,7 @@ export function SummaryCard({ accounts }: { accounts: DetailedAccount[] }) {
 
           <div className="flex flex-col gap-2">
             <span className={LABEL_CLASSNAME}>What happens next</span>
-            <ul className="flex flex-col gap-2 text-sm leading-md text-dim">
+            <ul className={cn(PROSE_CLASSNAME, 'flex flex-col gap-2 text-sm leading-md text-dim')}>
               {inFlight.length > 0 && (
                 <li>
                   <span className="text-link">{inFlight.length}</span> action{inFlight.length === 1 ? ' is' : 's are'} still being processed. Keep this tab open; each one updates in its step above.
@@ -143,7 +145,7 @@ export function SummaryCard({ accounts }: { accounts: DetailedAccount[] }) {
                     ) : (
                       <span className="text-success"> (should have arrived).</span>
                     )}{' '}
-                    If they don&apos;t show up, they will appear in step 6 instead; that card checks the contract every 30 seconds and you claim them with one Ethereum transaction.
+                    If they don&apos;t show up, they will appear in step 6 instead; that card checks the contract every 30 seconds and you claim them with one {l1} transaction.
                   </li>
                 )
               })}

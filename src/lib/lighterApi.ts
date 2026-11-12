@@ -1,5 +1,6 @@
 import { isPreview, isSamplePreview, previewAccountList, previewAssets, previewMarkets, previewNames, previewPools, previewState, PREVIEW_PUBLIC_KEY } from '../dev/preview'
-import { API_KEY_INDEX, LIGHTER_API_BASE, RESTRICTION_ERROR_CODES } from './config'
+import { API_KEY_INDEX, RESTRICTION_ERROR_CODES } from './config'
+import { activeEnvironment, type LighterEnvironment } from './environments'
 
 import type {
   ApiKeyInfo,
@@ -24,10 +25,11 @@ export class LighterApiError extends Error {
 
 const NOT_FOUND_CODES = new Set([21100, 21109, 21500])
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/** Calls the active deployment's API unless another one is named. */
+async function request<T>(path: string, init?: RequestInit, env: LighterEnvironment = activeEnvironment()): Promise<T> {
   let res: Response
   try {
-    res = await fetch(`${LIGHTER_API_BASE}/api/v1${path}`, {
+    res = await fetch(`${env.apiBase}/api/v1${path}`, {
       ...init,
       headers: { accept: 'application/json', ...(init?.headers ?? {}) },
     })
@@ -69,11 +71,18 @@ export function isRestrictionError(err: unknown): boolean {
 
 // ── Reads ──────────────────────────────────────────────────────────────────
 
-export async function fetchAccountsByL1Address(address: string): Promise<DetailedAccount[]> {
-  if (isSamplePreview()) return previewAccountList()
+/** Accounts owned by an address on one deployment (the active one unless named). */
+export async function fetchAccountsByL1Address(
+  address: string,
+  env: LighterEnvironment = activeEnvironment(),
+): Promise<DetailedAccount[]> {
+  // The fixtures model a Lighter (Ethereum) user.
+  if (isSamplePreview()) return env.id === 'mainnet' ? previewAccountList() : []
   try {
     const res = await request<{ accounts: DetailedAccount[] }>(
       `/account?by=l1_address&value=${address}&active_only=true`,
+      undefined,
+      env,
     )
     return res.accounts ?? []
   } catch (err) {

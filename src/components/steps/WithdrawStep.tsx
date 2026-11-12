@@ -1,3 +1,4 @@
+import { useEnvironment } from '../../hooks/useEnvironment'
 import { useActions, isInFlight } from '../../hooks/useActions'
 import { useExitAction, type ExitActionRequest } from '../../hooks/useExitAction'
 import { accountKey, useWithdrawalDelay } from '../../hooks/useLighterData'
@@ -5,10 +6,19 @@ import { useSigningKeys } from '../../hooks/useSigningKeys'
 import cn from '../../lib/cn'
 import { API_KEY_INDEX, ROUTE_PERP, ROUTE_SPOT, TX_TYPE } from '../../lib/config'
 import { formatAmount } from '../../lib/format'
-import { BTN_PRIMARY_CLASSNAME, BTN_ROW_CLASSNAME, BTN_SECONDARY_CLASSNAME } from '../../lib/recipes'
+import {
+  BTN_PRIMARY_CLASSNAME,
+  BTN_ROW_FIXED_CLASSNAME,
+  BTN_SECONDARY_CLASSNAME,
+  COL_ACTION_CLASSNAME,
+  COL_NUM_CLASSNAME,
+  COL_STATUS_CLASSNAME,
+  HELPER_CLASSNAME,
+  PROSE_CLASSNAME,
+} from '../../lib/recipes'
 import { signTransfer, signWithdraw } from '../../lib/signer'
 import { assertFits, isPositiveDecimal, UINT64_MAX } from '../../lib/units'
-import { ActionLine, StatusPill } from '../ActionStatus'
+import { ActionLines, StatusPill } from '../ActionStatus'
 import { Notice, StepCard, Table, type StepState } from '../StepCard'
 
 import type { ExitPlan, WithdrawItem } from '../../lib/plan'
@@ -29,6 +39,7 @@ export function WithdrawStep({
   master?: DetailedAccount
 }) {
   const { actions } = useActions()
+  const l1 = useEnvironment().l1Name
   const { keys, mode } = useSigningKeys()
   const { run, runSequence } = useExitAction()
   const delay = useWithdrawalDelay()
@@ -97,8 +108,8 @@ export function WithdrawStep({
       title={master ? 'Move to main account or withdraw' : 'Withdraw to your wallet'}
       description={
         master
-          ? `Balances on a sub-account can be moved into the main account first (free, instant, and amounts below the withdrawal minimum can go too) so everything is withdrawn once from there, or withdrawn straight to your wallet. Withdrawals take about ${delayText} to arrive on Ethereum.`
-          : `Withdraws each balance to the wallet that owns the account. Spot balances and perps collateral are separate routes, so an asset can appear twice. Lighter currently processes withdrawals in about ${delayText}, after which the tokens arrive on Ethereum.`
+          ? `Balances on a sub-account can be moved into the main account first (free, instant, and amounts below the withdrawal minimum can go too) so everything is withdrawn once from there, or withdrawn straight to your wallet. Withdrawals take about ${delayText} to arrive on ${l1}.`
+          : `Withdraws each balance to the wallet that owns the account. Spot balances and perps collateral are separate routes, so an asset can appear twice. Lighter currently processes withdrawals in about ${delayText}, after which the tokens arrive on ${l1}.`
       }
       state={stepState}
     >
@@ -114,7 +125,7 @@ export function WithdrawStep({
           {master && !canConsolidate && (
             <Notice>
               {mode === 'l1'
-                ? 'Moving to the main account needs the API; in Ethereum-only mode balances are withdrawn directly.'
+                ? `Moving to the main account needs the API; in ${l1}-only mode balances are withdrawn directly.`
                 : 'Unlock API signing in step 0 to move balances into the main account; until then they can only be withdrawn directly.'}
             </Notice>
           )}
@@ -123,10 +134,10 @@ export function WithdrawStep({
               <>
                 <th>Asset</th>
                 <th>From</th>
-                <th className="text-right">Amount</th>
-                <th className="text-right">Minimum</th>
-                <th className="text-right">Status</th>
-                <th />
+                <th className={COL_NUM_CLASSNAME}>Amount</th>
+                <th className={COL_NUM_CLASSNAME}>Minimum</th>
+                <th className={COL_STATUS_CLASSNAME}>Status</th>
+                <th className={COL_ACTION_CLASSNAME} />
               </>
             }
           >
@@ -135,29 +146,33 @@ export function WithdrawStep({
               const done = settled(w)
               return (
                 <tr key={w.id} className={cn((done || (w.belowMinimum && !canConsolidate)) && 'opacity-60')}>
-                  <td className="font-medium text-ink">{w.symbol}</td>
-                  <td className="text-dim">{w.route === ROUTE_PERP ? 'Perps collateral' : 'Spot balance'}</td>
-                  <td className="text-right font-mono tabular-nums text-ink">
-                    {formatAmount(w.amount, w.decimals)}
-                    {isPositiveDecimal(w.lockedInOrders) && (
-                      <span className="ml-1.5 text-2xs text-warn">+{formatAmount(w.lockedInOrders, w.decimals)} locked</span>
-                    )}
+                  <td data-cell="primary" className="font-medium text-ink">{w.symbol}</td>
+                  <td data-label="From" className="text-dim">{w.route === ROUTE_PERP ? 'Perps collateral' : 'Spot balance'}</td>
+                  <td data-label="Amount" className="text-right font-mono tabular-nums text-ink">
+                    {/* The locked part goes on its own line so the amounts stay in one right-aligned column. */}
+                    <span className="flex flex-col items-end">
+                      {formatAmount(w.amount, w.decimals)}
+                      {isPositiveDecimal(w.lockedInOrders) && (
+                        <span className="text-2xs text-warn">+{formatAmount(w.lockedInOrders, w.decimals)} locked</span>
+                      )}
+                    </span>
                   </td>
-                  <td className="text-right font-mono tabular-nums text-faint">{formatAmount(w.minWithdrawal, w.decimals)}</td>
-                  <td className="text-right">
+                  <td data-mobile="hide" className="text-right font-mono tabular-nums text-faint">{formatAmount(w.minWithdrawal, w.decimals)}</td>
+                  <td data-label="Status" className="text-right">
                     {w.belowMinimum && !state ? (
                       <span className="text-2xs tracking-caps text-faint uppercase">below minimum</span>
                     ) : (
                       <StatusPill state={state} />
                     )}
                   </td>
-                  <td className="text-right whitespace-nowrap">
+                  <td data-cell="action" className="text-right whitespace-nowrap">
                     {canConsolidate && (
                       <button
                         type="button"
                         disabled={!canAct || isInFlight(state) || done}
+                        title={!canAct ? (reason ?? undefined) : undefined}
                         onClick={() => void run(moveRequest(w))}
-                        className={cn(BTN_SECONDARY_CLASSNAME, BTN_ROW_CLASSNAME, 'mr-1.5')}
+                        className={cn(BTN_SECONDARY_CLASSNAME, BTN_ROW_FIXED_CLASSNAME, 'mr-1.5')}
                       >
                         {done && actions[moveId(w)] ? 'Moved' : 'Move'}
                       </button>
@@ -165,8 +180,9 @@ export function WithdrawStep({
                     <button
                       type="button"
                       disabled={!canAct || w.belowMinimum || isInFlight(state) || done}
+                      title={!canAct ? (reason ?? undefined) : undefined}
                       onClick={() => void run(withdrawRequest(w))}
-                      className={cn(BTN_SECONDARY_CLASSNAME, BTN_ROW_CLASSNAME)}
+                      className={cn(BTN_SECONDARY_CLASSNAME, BTN_ROW_FIXED_CLASSNAME)}
                     >
                       {done && actions[w.id] ? 'Sent' : 'Withdraw'}
                     </button>
@@ -175,9 +191,7 @@ export function WithdrawStep({
               )
             })}
           </Table>
-          <div className="flex flex-col gap-2">
-            {items.map((w) => (stateOf(w) ? <ActionLine key={w.id} state={stateOf(w)} /> : null))}
-          </div>
+          <ActionLines states={items.map(stateOf)} />
           <div className="flex flex-wrap items-center gap-3">
             {canConsolidate && (
               <button
@@ -192,23 +206,23 @@ export function WithdrawStep({
             <button
               type="button"
               disabled={!canAct || pendingWithdraw.length === 0 || anyInFlight}
+              title={!canAct ? (reason ?? undefined) : undefined}
               onClick={() => void runSequence(pendingWithdraw.map(withdrawRequest))}
               className={canConsolidate ? BTN_SECONDARY_CLASSNAME : BTN_PRIMARY_CLASSNAME}
             >
               Withdraw all {pendingWithdraw.length > 1 ? `(${pendingWithdraw.length})` : ''}
             </button>
-            {!canAct && reason && <span className="text-sm text-faint">{reason}</span>}
           </div>
           {items.some((w) => w.belowMinimum) && (
-            <p className="text-sm leading-md text-faint">
+            <p className={cn(PROSE_CLASSNAME, HELPER_CLASSNAME)}>
               {canConsolidate
                 ? "Amounts under an asset's minimum can't be withdrawn directly, but they can be moved to the main account and withdrawn from there once they add up."
                 : "Amounts under an asset's minimum can't be withdrawn and will stay on the account as dust."}
             </p>
           )}
           {master && canConsolidate && (
-            <p className="text-sm leading-md text-faint">
-              If Lighter refuses the transfer for this account, withdraw directly instead; moving has no Ethereum fallback.
+            <p className={cn(PROSE_CLASSNAME, HELPER_CLASSNAME)}>
+              If Lighter refuses the transfer for this account, withdraw directly instead; moving has no {l1} fallback.
             </p>
           )}
         </div>

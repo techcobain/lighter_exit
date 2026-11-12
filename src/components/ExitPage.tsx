@@ -1,18 +1,23 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { useAccount } from 'wagmi'
 
+import { ActionsProvider } from '../hooks/useActions'
+import { useEnvironment, useEnvironmentPresence } from '../hooks/useEnvironment'
 import { useAccountNames, useAccountsByAddress, useLiveAccounts } from '../hooks/useLighterData'
-import { useSigningKeys } from '../hooks/useSigningKeys'
+import { SigningKeysProvider, useSigningKeys } from '../hooks/useSigningKeys'
 import { useWalletGuard } from '../hooks/useWalletGuard'
 import { isPreview } from '../dev/preview'
-import { ACCOUNT_TYPE } from '../lib/config'
+import { ACCOUNT_TYPE, FORCE_L1_OPTION } from '../lib/config'
+import { chooseEnvironment, offersSwitch, setActiveEnvironment, type EnvironmentId } from '../lib/environments'
 import { describeError } from '../lib/format'
-import { CARD_CLASSNAME, LINK_CLASSNAME } from '../lib/recipes'
+import { CARD_CLASSNAME, LINK_CLASSNAME, PROSE_CLASSNAME } from '../lib/recipes'
 
 import { AccountExit } from './AccountExit'
 import { AccountPicker, accountDisplayName, sortAccounts } from './AccountPicker'
 import { ConnectCard } from './ConnectCard'
+import { EnvironmentBar, EnvironmentTag, otherDeploymentNote } from './EnvironmentBar'
+import { ForceL1Bar } from './ForceL1Bar'
 import { PreviewCard } from './PreviewCard'
 import { Faq } from './Faq'
 import { Header } from './Header'
@@ -26,6 +31,7 @@ export function ExitPage() {
   const { address: connected, isConnected } = useAccount()
   const [previewAddress, setPreviewAddress] = useState<`0x${string}` | null>(null)
   const address = isPreview ? previewAddress : isConnected && connected ? connected : previewAddress
+  const env = useEnvironment()
 
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-[840px] flex-col px-5 pb-10">
@@ -41,7 +47,7 @@ export function ExitPage() {
         )}
 
         {address ? (
-          <AccountsView address={address} />
+          <EnvironmentGate address={address} />
         ) : (
           <Section d={1}>
             {isPreview ? (
@@ -70,13 +76,14 @@ export function ExitPage() {
           <span>
             Contract{' '}
           <a
-            href="https://etherscan.io/address/0x3B4D794a66304F130a4Db8F2551B0070dfCf5ca7"
+            href={`${env.l1ExplorerAddress}${env.contract}`}
             target="_blank"
             rel="noreferrer"
             className={`${LINK_CLASSNAME} font-mono`}
           >
-            0x3B4D…5ca7
-          </a>
+            {env.contract.slice(0, 6)}…{env.contract.slice(-4)}
+          </a>{' '}
+          on {env.l1Name}
           </span>
         </p>
       </footer>
@@ -84,7 +91,60 @@ export function ExitPage() {
   )
 }
 
-function AccountsView({ address }: { address: `0x${string}` }) {
+/**
+ * Decides which Lighter deployment to show for the address, then renders the
+ * accounts on it. The address is looked up on every deployment at once; the
+ * choice is made once per address and after that only the user changes it, so
+ * a later refetch can never move someone to the other exchange mid-exit.
+ */
+function EnvironmentGate({ address }: { address: `0x${string}` }) {
+  const presence = useEnvironmentPresence(address)
+  const env = useEnvironment()
+  const [selection, setSelection] = useState<{ address: string; id: EnvironmentId } | null>(null)
+
+  const auto = chooseEnvironment({ mainnet: presence.mainnet.status, rh: presence.rh.status })
+  if (selection?.address !== address && auto) setSelection({ address, id: auto })
+  const target = selection?.address === address ? selection.id : null
+
+  useLayoutEffect(() => {
+    if (target) setActiveEnvironment(target)
+  }, [target])
+  // Back to the default once no address is shown, so the page chrome doesn't keep naming the last one.
+  useEffect(() => () => setActiveEnvironment('mainnet'), [])
+
+  if (!target || env.id !== target) {
+    return (
+      <Section d={1}>
+        <div className="h-40 animate-pulse rounded-panel border-[0.5px] border-line bg-fill" />
+      </Section>
+    )
+  }
+
+  // With nothing to choose, the deployment is a tag beside the account list rather than a row of its own.
+  const other = presence[env.id === 'mainnet' ? 'rh' : 'mainnet']
+  const switchable = offersSwitch(presence[env.id].status, other.status)
+  const tag = switchable ? null : <EnvironmentTag env={env} title={otherDeploymentNote(other)} />
+
+  // Keyed by deployment: action history and unlocked keys belong to one exchange and are dropped on a switch.
+  return (
+    <ActionsProvider key={env.id}>
+      <SigningKeysProvider>
+        {(switchable || FORCE_L1_OPTION) && (
+          <Section d={1}>
+            <div className="flex flex-col gap-4">
+              {switchable && <EnvironmentBar presence={presence} current={env.id} onSwitch={(id) => setSelection({ address, id })} />}
+              <ForceL1Bar />
+            </div>
+          </Section>
+        )}
+        <AccountsView address={address} tag={tag} />
+      </SigningKeysProvider>
+    </ActionsProvider>
+  )
+}
+
+function AccountsView({ address, tag }: { address: `0x${string}`; tag: ReactNode }) {
+  const env = useEnvironment()
   const accounts = useAccountsByAddress(address)
   const [selected, setSelected] = useState<number | null>(null)
   const guard = useWalletGuard(address)
@@ -118,20 +178,21 @@ function AccountsView({ address }: { address: `0x${string}` }) {
   if (accounts.error) {
     return (
       <Section d={1}>
-        <Notice tone="danger">Couldn&apos;t reach Lighter: {describeError(accounts.error)}</Notice>
+        <Notice tone="danger">Couldn&apos;t reach {env.name}: {describeError(accounts.error)}</Notice>
       </Section>
     )
   }
   if (list.length === 0) {
     return (
       <Section d={1}>
-        <div className={`${CARD_CLASSNAME} flex flex-col gap-2 p-6`}>
-          <h2 className="text-2xl font-medium tracking-heading text-ink">No Lighter account</h2>
-          <p className="max-w-[56ch] text-md leading-2xl text-dim">
-            Lighter has no account registered to this address. If you deposited from a different wallet, connect that one instead.
+        <div className={`${CARD_CLASSNAME} flex flex-col gap-2 p-6 max-mobile:p-4`}>
+          <h2 className="text-2xl font-medium tracking-heading text-ink">No {env.name} account</h2>
+          <p className={`${PROSE_CLASSNAME} text-md leading-2xl text-dim`}>
+            {env.name} ({env.l1Name}) has no account registered to this address. If you deposited from a different wallet, connect that one instead.
           </p>
         </div>
-        <div className="mt-8">
+        <div className="mt-5 flex flex-col gap-5">
+          {!canAct && reason && <Notice>{reason}</Notice>}
           <PendingBalancesStep address={address} canAct={canAct} reason={reason} />
         </div>
       </Section>
@@ -142,17 +203,20 @@ function AccountsView({ address }: { address: `0x${string}` }) {
     <>
       {list.length > 1 && (
         <Section d={1}>
-          <AccountPicker accounts={list} names={names.data} namesPending={names.isFetching} selected={current?.index ?? list[0]!.index} onSelect={setSelected} />
+          <AccountPicker accounts={list} names={names.data} namesPending={names.isFetching} selected={current?.index ?? list[0]!.index} onSelect={setSelected} tag={tag} />
         </Section>
       )}
-      {current && (
-        <Section d={2} key={current.index}>
-          <AccountExit initial={current} master={master} displayName={accountDisplayName(current, names.data)} />
+      {/* Steps 0–6 are one list, so the address-level claim card keeps the same gap as the steps above it. */}
+      <div className="flex flex-col gap-5">
+        {current && (
+          <Section d={2} key={current.index}>
+            <AccountExit initial={current} master={master} displayName={accountDisplayName(current, names.data)} tag={list.length > 1 ? null : tag} />
+          </Section>
+        )}
+        <Section d={2}>
+          <PendingBalancesStep address={address} canAct={canAct} reason={reason} />
         </Section>
-      )}
-      <Section d={2}>
-        <PendingBalancesStep address={address} canAct={canAct} reason={reason} />
-      </Section>
+      </div>
       <Section d={3}>
         <SummaryCard accounts={list} />
       </Section>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -27,10 +27,13 @@ export function AccountExit({
   initial,
   master,
   displayName,
+  tag,
 }: {
   initial: DetailedAccount
   master: DetailedAccount | undefined
   displayName?: string
+  /** Deployment tag, when neither the deployment switch nor the account list is there to carry it. */
+  tag?: ReactNode
 }) {
   const accountQuery = useLighterAccount(initial.index, initial)
   const account = accountQuery.data ?? initial
@@ -62,8 +65,11 @@ export function AccountExit({
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-end justify-between gap-4 border-b-[0.5px] border-line pb-5">
         <div className="flex flex-col gap-1">
-          <span className={LABEL_CLASSNAME}>
-            {displayName || account.name || accountTypeLabel(account.account_type)} · #{account.index}
+          <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+            {tag}
+            <span className={LABEL_CLASSNAME}>
+              {displayName || account.name || accountTypeLabel(account.account_type)} · #{account.index}
+            </span>
           </span>
           <div className="flex items-baseline gap-2">
             <span className="font-mono text-5xl font-medium tracking-display text-ink tabular-nums">
@@ -81,7 +87,7 @@ export function AccountExit({
           )}
           <span className="font-mono text-2xs text-faint">owner {shortenAddress(account.l1_address)}</span>
         </div>
-        <div className="flex items-center gap-3 text-sm text-faint">
+        <div className="flex items-center gap-3 text-2xs text-faint">
           <span className={cn(accountQuery.isFetching && 'animate-pulse')}>
             {accountQuery.isFetching ? 'Refreshing…' : `Updated ${ageSec}s ago`}
           </span>
@@ -95,6 +101,8 @@ export function AccountExit({
         <Notice tone="danger">Couldn&apos;t load market data from Lighter: {error instanceof Error ? error.message : String(error)}</Notice>
       )}
       {guard.wrongChain && <Notice tone="warn">{guard.reason}</Notice>}
+      {/* Said once here; the disabled buttons below carry it as a tooltip only. */}
+      {!canAct && reason && <Notice>{reason}</Notice>}
 
       {plan && plan.pendingUnlocks.length > 0 && (
         <Notice tone="info">
@@ -134,15 +142,15 @@ export function AccountExit({
             This is a public pool you operate. Its positions and orders are handled with the pool&apos;s own key; freezing and burning your operator shares are signed by your main account.
           </Notice>
           <SigningKeyCard accountIndex={account.index} label={`pool #${account.index}`} canAct={canAct} reason={reason} />
-          <CancelOrdersStep accountIndex={account.index} plan={plan} canAct={canAct} reason={reason} />
-          <ClosePositionsStep accountIndex={account.index} plan={plan} canAct={canAct} reason={reason} />
+          <CancelOrdersStep accountIndex={account.index} plan={plan} canAct={canAct} reason={reason} dataUpdatedAt={accountQuery.dataUpdatedAt} />
+          <ClosePositionsStep accountIndex={account.index} plan={plan} canAct={canAct} reason={reason} dataUpdatedAt={accountQuery.dataUpdatedAt} />
           <PoolWindDownStep pool={account} master={master} plan={plan} canAct={canAct} reason={reason} />
         </div>
       ) : (
         <div className="flex flex-col gap-5">
           <SigningKeyCard accountIndex={account.index} canAct={canAct} reason={reason} />
-          <CancelOrdersStep accountIndex={account.index} plan={plan} canAct={canAct} reason={reason} />
-          <ClosePositionsStep accountIndex={account.index} plan={plan} canAct={canAct} reason={reason} />
+          <CancelOrdersStep accountIndex={account.index} plan={plan} canAct={canAct} reason={reason} dataUpdatedAt={accountQuery.dataUpdatedAt} />
+          <ClosePositionsStep accountIndex={account.index} plan={plan} canAct={canAct} reason={reason} dataUpdatedAt={accountQuery.dataUpdatedAt} />
           <BurnSharesStep accountIndex={account.index} plan={plan} canAct={canAct} reason={reason} />
           <UnstakeStep accountIndex={account.index} plan={plan} assets={assets} canAct={canAct} reason={reason} />
           <WithdrawStep accountIndex={account.index} plan={plan} canAct={canAct} reason={reason} master={account.account_type === ACCOUNT_TYPE.SUB ? master : undefined} />

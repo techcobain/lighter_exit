@@ -1,19 +1,27 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 
 import { useReadContracts } from 'wagmi'
-import { mainnet } from 'wagmi/chains'
 
 import { useActions, isInFlight } from '../../hooks/useActions'
+import { useEnvironment } from '../../hooks/useEnvironment'
 import { useL1Action, type L1ActionRequest } from '../../hooks/useL1Action'
 import { useAssets } from '../../hooks/useLighterData'
+import { useRecheckAfterExecution } from '../../hooks/useRecheckAfterExecution'
 import { isSamplePreview, previewState } from '../../dev/preview'
 import cn from '../../lib/cn'
-import { LIGHTER_CONTRACT } from '../../lib/config'
 import { zkLighterAbi } from '../../lib/contract'
 import { formatAmount } from '../../lib/format'
-import { BTN_PRIMARY_CLASSNAME, BTN_ROW_CLASSNAME, BTN_SECONDARY_CLASSNAME } from '../../lib/recipes'
+import {
+  BTN_PRIMARY_CLASSNAME,
+  BTN_ROW_FIXED_CLASSNAME,
+  BTN_SECONDARY_CLASSNAME,
+  COL_ACTION_CLASSNAME,
+  COL_NUM_CLASSNAME,
+  COL_STATUS_CLASSNAME,
+} from '../../lib/recipes'
+import { awaitingRefresh, lastExecutedAt } from '../../lib/settle'
 import { fromBaseUnits } from '../../lib/units'
-import { ActionLine, StatusPill } from '../ActionStatus'
+import { ActionLines, StatusPill } from '../ActionStatus'
 import { Notice, StepCard, Table, type StepState } from '../StepCard'
 
 export function PendingBalancesStep({
@@ -25,6 +33,7 @@ export function PendingBalancesStep({
   canAct: boolean
   reason: string | null
 }) {
+  const env = useEnvironment()
   const assets = useAssets()
   const { actions } = useActions()
   const { run, runSequence } = useL1Action()
@@ -35,11 +44,11 @@ export function PendingBalancesStep({
 
   const reads = useReadContracts({
     contracts: assetList.map((a) => ({
-      address: LIGHTER_CONTRACT,
+      address: env.contract,
       abi: zkLighterAbi,
       functionName: 'getPendingBalance' as const,
       args: [address, a.asset_id] as const,
-      chainId: mainnet.id,
+      chainId: env.chain.id,
     })),
     query: { enabled: assetList.length > 0 && !isSamplePreview(), refetchInterval: 30_000 },
   })
@@ -68,14 +77,25 @@ export function PendingBalancesStep({
   })
 
   const anyInFlight = rows.some((r) => isInFlight(actions[r.id]))
-  const pending = rows.filter((r) => !isInFlight(actions[r.id]))
+  // Claims are contract transactions: once one executes, the balance stays locked until the contract
+  // has been read again, so a second click cannot pay gas for a claim that is already done.
+  const { refetch, dataUpdatedAt } = reads
+  const settling = (r: (typeof rows)[number]) => !isSamplePreview() && awaitingRefresh(actions[r.id], dataUpdatedAt)
+  const pending = rows.filter((r) => !isInFlight(actions[r.id]) && !settling(r))
+  const executedAt = lastExecutedAt(rows.map((r) => actions[r.id]))
+  useEffect(() => {
+    if (executedAt && !isSamplePreview()) void refetch()
+  }, [executedAt, refetch])
+  useRecheckAfterExecution(executedAt, () => {
+    if (!isSamplePreview()) void refetch()
+  })
   const stepState: StepState = !isSamplePreview() && reads.isPending && assetList.length > 0 ? 'loading' : rows.length === 0 ? 'empty' : anyInFlight ? 'active' : 'todo'
 
   return (
     <StepCard
       step={6}
-      title="Claim balances waiting on Ethereum"
-      description="Sometimes a withdrawal can't be pushed to a wallet and Lighter parks it in the contract instead. Anything sitting there under your address is listed here; claiming is a plain Ethereum transaction and doesn't involve Lighter's servers. This card is checked every 30 seconds, so keep an eye on it after your withdrawals go through."
+      title={`Claim balances waiting on ${env.l1Name}`}
+      description={`Sometimes a withdrawal can't be pushed to a wallet and Lighter parks it in the contract instead. Anything sitting there under your address is listed here; claiming is a plain ${env.l1Name} transaction and doesn't involve Lighter's servers. This card is checked every 30 seconds, so keep an eye on it after your withdrawals go through.`}
       state={stepState}
     >
       {rows.length === 0 ? (
@@ -86,50 +106,50 @@ export function PendingBalancesStep({
             head={
               <>
                 <th>Asset</th>
-                <th className="text-right">Amount</th>
-                <th className="text-right">Status</th>
-                <th />
+                <th className={COL_NUM_CLASSNAME}>Amount</th>
+                <th className={COL_STATUS_CLASSNAME}>Status</th>
+                <th className={COL_ACTION_CLASSNAME} />
               </>
             }
           >
             {rows.map((r) => {
               const state = actions[r.id]
+              const done = settling(r)
               return (
-                <tr key={r.id}>
-                  <td className="font-medium text-ink">{r.asset.symbol}</td>
-                  <td className="text-right font-mono tabular-nums text-ink">
+                <tr key={r.id} className={cn(done && 'opacity-60')}>
+                  <td data-cell="primary" className="font-medium text-ink">{r.asset.symbol}</td>
+                  <td data-label="Amount" className="text-right font-mono tabular-nums text-ink">
                     {formatAmount(fromBaseUnits(r.amount, r.asset.l1_decimals), 8)}
                   </td>
-                  <td className="text-right">
+                  <td data-label="Status" className="text-right">
                     <StatusPill state={state} />
                   </td>
-                  <td className="text-right">
+                  <td data-cell="action" className="text-right">
                     <button
                       type="button"
-                      disabled={!canAct || isInFlight(state)}
+                      disabled={!canAct || isInFlight(state) || done}
+                      title={!canAct ? (reason ?? undefined) : undefined}
                       onClick={() => void run(request(r))}
-                      className={cn(BTN_SECONDARY_CLASSNAME, BTN_ROW_CLASSNAME)}
+                      className={cn(BTN_SECONDARY_CLASSNAME, BTN_ROW_FIXED_CLASSNAME)}
                     >
-                      Claim
+                      {done ? 'Claimed' : 'Claim'}
                     </button>
                   </td>
                 </tr>
               )
             })}
           </Table>
-          <div className="flex flex-col gap-2">
-            {rows.map((r) => (actions[r.id] ? <ActionLine key={r.id} state={actions[r.id]} /> : null))}
-          </div>
+          <ActionLines states={rows.map((r) => actions[r.id])} />
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
               disabled={!canAct || pending.length === 0 || anyInFlight}
+              title={!canAct ? (reason ?? undefined) : undefined}
               onClick={() => void runSequence(pending.map(request) as L1ActionRequest[])}
               className={BTN_PRIMARY_CLASSNAME}
             >
               Claim all
             </button>
-            {!canAct && reason && <span className="text-sm text-faint">{reason}</span>}
           </div>
         </div>
       )}

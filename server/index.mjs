@@ -1,22 +1,42 @@
 // Production server: serves the built SPA from dist/ and proxies the Lighter
-// REST API under /lighter-api so the browser never has to reach Lighter's
-// domain directly (useful for users whose region is blocked from it).
+// REST APIs (/lighter-api for Lighter, /lighter-api-rh for Lighter on Robinhood
+// Chain) so the browser never has to reach Lighter's domains directly (useful
+// for users whose region is blocked from them).
 //
 // Zero dependencies on purpose — only Node 22 built-ins.
 import http from 'node:http'
 import { promises as fs, createReadStream } from 'node:fs'
 import path from 'node:path'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DIST = path.resolve(__dirname, '..', 'dist')
 const PORT = Number(process.env.PORT ?? 8787)
-const UPSTREAM = (process.env.LIGHTER_API_URL ?? 'https://mainnet.zklighter.elliot.ai').replace(
-  /\/$/,
-  '',
-)
-const PROXY_PREFIX = '/lighter-api'
+const upstream = (name, fallback) => (process.env[name] ?? fallback).replace(/\/$/, '')
+// Path prefix → the one host it forwards to.
+const PROXIES = {
+  '/lighter-api': upstream('LIGHTER_API_URL', 'https://mainnet.zklighter.elliot.ai'),
+  '/lighter-api-rh': upstream('LIGHTER_RH_API_URL', 'https://api.rh.lighter.xyz'),
+}
 const PROXY_TIMEOUT_MS = 30_000
+
+const envNumber = (name, fallback) => {
+  const n = Number(process.env[name])
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+// Proxy limits. A signed Lighter transaction is a few kilobytes of form data,
+// and one browser session peaks at a few requests per second while it polls.
+const MAX_BODY_BYTES = envNumber('PROXY_MAX_BODY_BYTES', 256 * 1024)
+const MAX_INFLIGHT = envNumber('PROXY_MAX_INFLIGHT', 200)
+const RATE_BURST = envNumber('PROXY_RATE_BURST', 120)
+const RATE_PER_SEC = envNumber('PROXY_RATE_PER_MIN', 240) / 60
+// Header the platform's edge sets to the real client address (Railway: X-Real-IP).
+// Set to an empty string when nothing trusted sits in front of this server, so
+// clients cannot pick their own rate-limit bucket.
+const CLIENT_IP_HEADER = (process.env.CLIENT_IP_HEADER ?? 'x-real-ip').trim().toLowerCase()
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -34,6 +54,54 @@ const MIME = {
   '.map': 'application/json; charset=utf-8',
 }
 
+// ── Security headers ───────────────────────────────────────────────────────
+
+/**
+ * The page only ever talks to this server, the Ethereum RPC, and (when
+ * enabled) WalletConnect. The build writes the exact origins it was configured
+ * with to dist/csp.json; CSP_CONNECT_SRC adds more at runtime.
+ */
+async function buildCsp() {
+  let manifest = null
+  try {
+    manifest = JSON.parse(await fs.readFile(path.join(DIST, 'csp.json'), 'utf8'))
+  } catch {
+    console.warn('dist/csp.json missing or unreadable: connect-src falls back to any https/wss origin')
+  }
+  const list = (key) => (Array.isArray(manifest?.[key]) ? manifest[key].filter((v) => typeof v === 'string') : [])
+  const extraConnect = (process.env.CSP_CONNECT_SRC ?? '').split(/\s+/).filter(Boolean)
+  const connect = manifest ? [...list('connectSrc'), ...extraConnect] : ['https:', 'wss:', ...extraConnect]
+  const frames = list('frameSrc')
+  const directives = {
+    'default-src': ["'self'"],
+    // 'wasm-unsafe-eval' lets the Go signer compile; nothing else may be evaluated or inlined.
+    'script-src': ["'self'", "'wasm-unsafe-eval'"],
+    'style-src': ["'self'", "'unsafe-inline'"],
+    'img-src': ["'self'", 'data:', 'blob:', ...list('imgSrc')],
+    'font-src': ["'self'", 'data:', ...list('fontSrc')],
+    'connect-src': ["'self'", ...connect],
+    'frame-src': frames.length ? frames : ["'none'"],
+    'object-src': ["'none'"],
+    'base-uri': ["'self'"],
+    'form-action': ["'self'"],
+    'frame-ancestors': ["'none'"],
+  }
+  return Object.entries(directives)
+    .map(([name, values]) => `${name} ${[...new Set(values)].join(' ')}`)
+    .join('; ')
+}
+
+const SECURITY_HEADERS = {
+  'content-security-policy': await buildCsp(),
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'referrer-policy': 'no-referrer',
+  // Ignored by browsers over plain http, so harmless in local runs.
+  'strict-transport-security': 'max-age=31536000',
+}
+
+// ── Static files ───────────────────────────────────────────────────────────
+
 async function stat(file) {
   try {
     return await fs.stat(file)
@@ -50,9 +118,16 @@ function pickEncoding(req) {
 }
 
 async function serveStatic(req, res, urlPath) {
-  const safe = path.normalize(decodeURIComponent(urlPath)).replace(/^(\.\.[/\\])+/, '')
+  let decoded
+  try {
+    decoded = decodeURIComponent(urlPath)
+  } catch {
+    res.writeHead(400, { 'content-type': 'text/plain' }).end('bad request')
+    return
+  }
+  const safe = path.normalize(decoded).replace(/^(\.\.[/\\])+/, '')
   let file = path.join(DIST, safe)
-  if (!file.startsWith(DIST)) {
+  if (file !== DIST && !file.startsWith(DIST + path.sep)) {
     res.writeHead(403).end()
     return
   }
@@ -73,7 +148,6 @@ async function serveStatic(req, res, urlPath) {
   const ext = path.extname(file)
   const headers = {
     'content-type': MIME[ext] ?? 'application/octet-stream',
-    'x-content-type-options': 'nosniff',
   }
   // Hashed Vite assets are immutable; everything else revalidates.
   headers['cache-control'] = safe.startsWith('/assets/')
@@ -103,30 +177,125 @@ async function serveStatic(req, res, urlPath) {
   createReadStream(toSend).pipe(res)
 }
 
-async function proxy(req, res, url) {
+// ── Proxy ──────────────────────────────────────────────────────────────────
+
+function sendJson(res, status, message, extraHeaders = {}) {
+  res
+    .writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', ...extraHeaders })
+    .end(JSON.stringify({ code: status, message }))
+}
+
+function clientKey(req) {
+  const header = CLIENT_IP_HEADER ? req.headers[CLIENT_IP_HEADER] : undefined
+  const fromHeader = (Array.isArray(header) ? header[0] : header)?.split(',')[0]?.trim()
+  let ip = fromHeader || req.socket.remoteAddress || 'unknown'
+  if (ip.startsWith('::ffff:')) ip = ip.slice(7)
+  // One IPv6 subscriber usually holds a whole /64, so limit by prefix.
+  if (ip.includes(':')) ip = ip.split(':').slice(0, 4).join(':')
+  return ip
+}
+
+// Token bucket per client address: RATE_BURST requests at once, refilled at RATE_PER_SEC.
+const buckets = new Map()
+const MAX_BUCKETS = 100_000
+
+/** Returns 0 when the request may go ahead, otherwise the seconds to wait. */
+function rateLimit(key) {
+  const now = Date.now()
+  let bucket = buckets.get(key)
+  if (!bucket) {
+    if (buckets.size >= MAX_BUCKETS) buckets.clear()
+    bucket = { tokens: RATE_BURST, at: now }
+    buckets.set(key, bucket)
+  }
+  bucket.tokens = Math.min(RATE_BURST, bucket.tokens + ((now - bucket.at) / 1000) * RATE_PER_SEC)
+  bucket.at = now
+  if (bucket.tokens < 1) return Math.max(1, Math.ceil((1 - bucket.tokens) / RATE_PER_SEC))
+  bucket.tokens -= 1
+  return 0
+}
+
+// Forget clients whose bucket has refilled.
+setInterval(() => {
+  const idleMs = (RATE_BURST / RATE_PER_SEC) * 1000
+  const now = Date.now()
+  for (const [key, bucket] of buckets) if (now - bucket.at > idleMs) buckets.delete(key)
+}, 60_000).unref()
+
+/** Reads the request body up to `limit` bytes. */
+function readBody(req, limit) {
+  return new Promise((resolve) => {
+    const chunks = []
+    let size = 0
+    let settled = false
+    const done = (result) => {
+      if (settled) return
+      settled = true
+      req.off('data', onData)
+      resolve(result)
+    }
+    const onData = (chunk) => {
+      size += chunk.length
+      if (size > limit) done({ tooLarge: true })
+      else chunks.push(chunk)
+    }
+    req.on('data', onData)
+    req.on('end', () => done({ body: Buffer.concat(chunks) }))
+    req.on('error', () => done({ aborted: true }))
+    req.on('close', () => done({ aborted: true }))
+  })
+}
+
+let inflight = 0
+
+async function proxy(req, res, url, prefix) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     res.writeHead(405).end()
     return
   }
-  const upstreamPath = url.pathname.slice(PROXY_PREFIX.length)
+  const upstreamPath = url.pathname.slice(prefix.length)
   if (!upstreamPath.startsWith('/api/v1/')) {
     res.writeHead(404, { 'content-type': 'application/json' }).end('{"error":"not found"}')
     return
   }
-  const target = `${UPSTREAM}${upstreamPath}${url.search}`
+
+  const wait = rateLimit(clientKey(req))
+  if (wait > 0) {
+    sendJson(res, 429, 'Too many requests, slow down.', { 'retry-after': String(wait) })
+    return
+  }
+  if (inflight >= MAX_INFLIGHT) {
+    sendJson(res, 503, 'Server busy, try again shortly.', { 'retry-after': '2' })
+    return
+  }
+
+  const target = `${PROXIES[prefix]}${upstreamPath}${url.search}`
   const headers = { accept: 'application/json' }
   if (req.headers['content-type']) headers['content-type'] = req.headers['content-type']
   if (req.headers.authorization) headers.authorization = req.headers.authorization
 
   let body
   if (req.method === 'POST') {
-    const chunks = []
-    for await (const chunk of req) chunks.push(chunk)
-    body = Buffer.concat(chunks)
+    const tooLarge = () => sendJson(res, 413, 'Request body too large.', { connection: 'close' })
+    if (Number(req.headers['content-length']) > MAX_BODY_BYTES) {
+      tooLarge()
+      return
+    }
+    const read = await readBody(req, MAX_BODY_BYTES)
+    if (read.aborted) return
+    if (read.tooLarge) {
+      tooLarge()
+      return
+    }
+    body = read.body
   }
 
   const controller = new AbortController()
+  // Covers the whole exchange, body included.
   const timer = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS)
+  const onClose = () => controller.abort()
+  res.on('close', onClose)
+  inflight++
   try {
     const upstream = await fetch(target, {
       method: req.method,
@@ -135,32 +304,41 @@ async function proxy(req, res, url) {
       signal: controller.signal,
       redirect: 'manual',
     })
-    const buf = Buffer.from(await upstream.arrayBuffer())
     res.writeHead(upstream.status, {
       'content-type': upstream.headers.get('content-type') ?? 'application/json',
-      'content-length': String(buf.length),
       'cache-control': 'no-store',
     })
-    res.end(buf)
+    // Streamed rather than buffered, so a large upstream answer never sits in memory.
+    if (upstream.body) await pipeline(Readable.fromWeb(upstream.body), res)
+    else res.end()
   } catch (err) {
-    const aborted = err?.name === 'AbortError'
-    res
-      .writeHead(aborted ? 504 : 502, { 'content-type': 'application/json' })
-      .end(JSON.stringify({ code: aborted ? 504 : 502, message: 'upstream unavailable' }))
+    if (res.headersSent) {
+      // Failed mid-stream (timeout, upstream reset, client gone): nothing sane left to send.
+      res.destroy()
+    } else {
+      const aborted = err?.name === 'AbortError'
+      sendJson(res, aborted ? 504 : 502, 'upstream unavailable')
+    }
   } finally {
+    inflight--
     clearTimeout(timer)
+    res.off('close', onClose)
   }
 }
 
+// ── Server ─────────────────────────────────────────────────────────────────
+
 const server = http.createServer(async (req, res) => {
   try {
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value)
     const url = new URL(req.url ?? '/', 'http://localhost')
     if (url.pathname === '/healthz') {
       res.writeHead(200, { 'content-type': 'text/plain' }).end('ok')
       return
     }
-    if (url.pathname.startsWith(PROXY_PREFIX)) {
-      await proxy(req, res, url)
+    const prefix = Object.keys(PROXIES).find((p) => url.pathname === p || url.pathname.startsWith(`${p}/`))
+    if (prefix) {
+      await proxy(req, res, url, prefix)
       return
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -175,6 +353,11 @@ const server = http.createServer(async (req, res) => {
   }
 })
 
+// A whole request (headers and body) must arrive within this window.
+server.requestTimeout = 30_000
+server.headersTimeout = 15_000
+
 server.listen(PORT, () => {
-  console.log(`lighter-exit listening on :${PORT} (proxy → ${UPSTREAM})`)
+  const routes = Object.entries(PROXIES).map(([prefix, host]) => `${prefix} → ${host}`).join(', ')
+  console.log(`lighter-exit listening on :${PORT} (${routes})`)
 })

@@ -55,7 +55,8 @@ export type PriorityRoute = 'core' | 'legacy'
 
 export interface L1Addresses {
   zkLighter: Address
-  coreMessaging: Address
+  /** Absent on deployments that never moved the Priority Transactions off ZkLighter. */
+  coreMessaging?: Address
 }
 
 /** Picks the contract, ABI and argument encoding for one L1 write. */
@@ -69,6 +70,7 @@ export function resolveL1Call(
     return { address: addresses.zkLighter, abi: zkLighterAbi, functionName, args } as const
   }
   if (route === 'core') {
+    if (!addresses.coreMessaging) throw new Error('This Lighter deployment has no L1CoreMessaging contract')
     return { address: addresses.coreMessaging, abi: coreMessagingAbi, functionName, args } as const
   }
   const legacyArgs = functionName === 'createOrder' ? [args[0], Number(args[1]), ...args.slice(2)] : args

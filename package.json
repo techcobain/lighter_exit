@@ -8,7 +8,8 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node scripts/precompress.mjs",
+    "build": "node scripts/verify-wasm.mjs && vite build && node scripts/precompress.mjs",
+    "verify:wasm": "node scripts/verify-wasm.mjs",
     "start": "node server/index.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",

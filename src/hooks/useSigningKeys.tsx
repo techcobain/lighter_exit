@@ -5,7 +5,8 @@
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import { useSignMessage } from 'wagmi'
+import { getAddress } from 'viem'
+import { useAccount, useSignMessage } from 'wagmi'
 
 import { isPreview, previewState, PREVIEW_PUBLIC_KEY } from '../dev/preview'
 import { API_KEY_INDEX, TX_TYPE } from '../lib/config'
@@ -13,6 +14,8 @@ import { describeError } from '../lib/format'
 import { fetchApiKey, fetchNextNonce, isRestrictionError, sendTx } from '../lib/lighterApi'
 import { createClientFromSeed, keyDerivationMessage, loadSigner, signChangePubKey, type DerivedKey } from '../lib/signer'
 
+import { useEnvironment } from './useEnvironment'
+import { useForceL1Scope } from './useForceL1'
 import { useL1Action } from './useL1Action'
 
 export type KeyStage =
@@ -66,6 +69,10 @@ export function SigningKeysProvider({ children }: { children: ReactNode }) {
   const [keys, setKeys] = useState<Record<number, KeyState | undefined>>({})
   const [mode, setMode] = useState<RouteMode>('api')
   const { signMessageAsync } = useSignMessage()
+  const { address } = useAccount()
+  const env = useEnvironment()
+  // Registering a key is not a trading operation, so only the 'all' scope sends it to the contract.
+  const forceL1 = useForceL1Scope() === 'all'
   const { run: runL1 } = useL1Action()
   const busy = useRef(new Set<number>())
 
@@ -87,10 +94,12 @@ export function SigningKeysProvider({ children }: { children: ReactNode }) {
   )
 
   const registerViaL1 = useCallback(
-    async (accountIndex: number, key: DerivedKey) => {
+    async (accountIndex: number, key: DerivedKey, forced = false) => {
       patch(accountIndex, {
         stage: 'registering-l1',
-        message: 'The API refused this account, registering the key through the Ethereum contract instead',
+        message: forced
+          ? `Contract calls are forced, registering the key through the ${env.l1Name} contract`
+          : `The API refused this account, registering the key through the ${env.l1Name} contract instead`,
       })
       const confirmed = await runL1({
         id: `regkey-${accountIndex}`,
@@ -99,11 +108,11 @@ export function SigningKeysProvider({ children }: { children: ReactNode }) {
         args: [accountIndex, API_KEY_INDEX, `0x${key.publicKey}`],
       })
       if (!confirmed) throw new Error('Registration transaction did not go through.')
-      patch(accountIndex, { message: 'Confirmed on Ethereum, waiting for Lighter to pick the key up (about two minutes)…' })
+      patch(accountIndex, { message: `Confirmed on ${env.l1Name}, waiting for Lighter to pick the key up (about two minutes)…` })
       const ok = await waitForRegistration(accountIndex, key.publicKey, 15 * 60_000, 10_000)
       if (!ok) throw new Error('Lighter has not picked the key up yet. Use "Check again" in a few minutes.')
     },
-    [patch, runL1],
+    [env.l1Name, patch, runL1],
   )
 
   const unlock = useCallback(
@@ -123,19 +132,35 @@ export function SigningKeysProvider({ children }: { children: ReactNode }) {
         patch(accountIndex, { stage: 'loading-signer', message: 'Loading the Lighter signer (about 2 MB)…' })
         await loadSigner()
         patch(accountIndex, { stage: 'deriving', message: 'Sign the message in your wallet to derive the key' })
-        const seed = await signMessageAsync({ message: keyDerivationMessage(accountIndex, API_KEY_INDEX) })
+        if (!address) throw new Error('Connect your wallet first.')
+        const seed = await signMessageAsync({
+          message: keyDerivationMessage({
+            host: window.location.host,
+            origin: window.location.origin,
+            address: getAddress(address),
+            accountIndex,
+            apiKeyIndex: API_KEY_INDEX,
+            environmentName: env.name,
+            lighterChainId: env.lighterChainId,
+            l1ChainId: env.chain.id,
+          }),
+        })
         const nonce = await fetchNextNonce(accountIndex, API_KEY_INDEX)
-        const key = await createClientFromSeed({ seedHex: seed, accountIndex, nonce, apiKeyIndex: API_KEY_INDEX })
+        const key = await createClientFromSeed({ seedHex: seed, lighterChainId: env.lighterChainId, accountIndex, nonce, apiKeyIndex: API_KEY_INDEX })
         patch(accountIndex, { stage: 'checking', key, nonce, message: 'Checking whether the key is registered…' })
         if (await isRegistered(accountIndex, key.publicKey)) {
           patch(accountIndex, { stage: 'registered', message: undefined })
           return
         }
-        try {
-          await registerViaApi(accountIndex, key, nonce)
-        } catch (err) {
-          if (!isRestrictionError(err)) throw err
-          await registerViaL1(accountIndex, key)
+        if (forceL1) {
+          await registerViaL1(accountIndex, key, true)
+        } else {
+          try {
+            await registerViaApi(accountIndex, key, nonce)
+          } catch (err) {
+            if (!isRestrictionError(err)) throw err
+            await registerViaL1(accountIndex, key)
+          }
         }
         patch(accountIndex, { stage: 'registered', message: undefined })
       } catch (err) {
@@ -145,7 +170,7 @@ export function SigningKeysProvider({ children }: { children: ReactNode }) {
         busy.current.delete(accountIndex)
       }
     },
-    [keys, patch, registerViaApi, registerViaL1, signMessageAsync],
+    [address, env, forceL1, keys, patch, registerViaApi, registerViaL1, signMessageAsync],
   )
 
   const recheck = useCallback(

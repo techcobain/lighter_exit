@@ -45,6 +45,61 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Step tables on phones (below --breakpoint-mobile): no sideways scrolling.
+   Each row is a block with the name and its button on the first line and one
+   "label … value" line per remaining cell. Unlayered on purpose, so it wins
+   over the cell utilities set by the Table component. */
+@media (width < 768px) {
+  .stack-table,
+  .stack-table tbody {
+    display: block;
+  }
+  .stack-table thead,
+  .stack-table td[data-mobile='hide'],
+  .stack-table td[data-label]:empty {
+    display: none;
+  }
+  .stack-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 6px;
+    padding-block: 12px;
+  }
+  .stack-table td {
+    padding: 0;
+    text-align: left;
+  }
+  .stack-table td[data-cell='primary'] {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .stack-table td[data-cell='action'] {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+  }
+  .stack-table td[data-label] {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    text-align: right;
+  }
+  .stack-table td[data-label]::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-2xs);
+    font-weight: 500;
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--color-meta);
+  }
+}
+
 /* Official InterVariable — self-hosted. This woff2 is the canonical rsms
    variable build (wght + opsz axes + all OpenType features); the family is
    declared as 'Inter Variable' to match --font-sans. */

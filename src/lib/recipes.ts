@@ -32,3 +32,20 @@ export const LABEL_CLASSNAME =
   'text-2xs font-medium tracking-caps text-meta uppercase'
 
 export const LINK_CLASSNAME = 'text-link underline-offset-2 hover:underline'
+
+/** One reading measure for every paragraph, in pixels so prose set at different sizes ends on the same edge. */
+export const PROSE_CLASSNAME = 'max-w-[560px]'
+
+/** Small note beside or under a control. Sentence case; caps are for labels only. */
+export const HELPER_CLASSNAME = 'text-sm leading-md text-faint'
+
+/** A labelled group inside a step card, set off from what is above it. */
+export const SUBSECTION_CLASSNAME = 'flex flex-col gap-3 border-t-[0.5px] border-line pt-5'
+
+/** Table column widths shared by every step, so the right-hand columns line up from card to card. */
+export const COL_NUM_CLASSNAME = 'w-24 text-right'
+export const COL_STATUS_CLASSNAME = 'w-36 text-right'
+export const COL_ACTION_CLASSNAME = 'w-24'
+
+/** Row buttons share a width so the action column reads as one edge. */
+export const BTN_ROW_FIXED_CLASSNAME = `${BTN_ROW_CLASSNAME} min-w-[76px]`

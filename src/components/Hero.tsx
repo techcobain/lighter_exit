@@ -1,4 +1,4 @@
-import { PAGE_TITLE_CLASSNAME } from '../lib/recipes'
+import { PAGE_TITLE_CLASSNAME, PROSE_CLASSNAME } from '../lib/recipes'
 
 // Adapted from perps-fe FramedPageHeader: blueprint frame + corner ticks.
 const CornerSpans = () => (
@@ -12,17 +12,17 @@ const CornerSpans = () => (
 
 export function Hero() {
   return (
-    <div className="relative mb-6 flex w-full flex-col gap-4 border border-ink/5 bg-ink/5 p-5">
+    <div className="relative flex w-full flex-col gap-4 border border-ink/5 bg-ink/5 p-6 max-mobile:p-4">
       <p className="text-2xs font-medium tracking-caps text-meta uppercase">
         lighter · self-service exit
       </p>
       <h1 className={PAGE_TITLE_CLASSNAME}>Close everything and withdraw</h1>
-      <p className="max-w-[58ch] text-md leading-2xl text-dim">
+      <p className={`${PROSE_CLASSNAME} text-md leading-2xl text-dim`}>
         If you can no longer use the Lighter app, this page lets you wind your
-        account down straight from Ethereum: close open perp positions, exit
+        account down straight from your wallet: close open perp positions, exit
         public pools, unstake, and withdraw every asset to your wallet. Every
         step is a transaction you sign yourself, sent directly to Lighter&apos;s
-        contract.
+        contract. Works for Lighter (Ethereum) and Lighter RH (Robinhood Chain).
       </p>
       <CornerSpans />
     </div>

@@ -5,15 +5,35 @@ Lighter app: cancel orders, close perp positions, exit public pools, unstake
 from the staking pool, withdraw every asset, and claim anything parked in the
 L1 contract. Built for users whose region is restricted.
 
+It covers both Lighter deployments, which are separate exchanges:
+
+| | Lighter | Lighter RH |
+| --- | --- | --- |
+| Contract chain | Ethereum (1) | Robinhood Chain (4663) |
+| ZkLighter contract | `0x3B4D794a66304F130a4Db8F2551B0070dfCf5ca7` | `0x94bAB9693Ba2f6358507eFfcbd372b0660AFfF9d` |
+| API | `mainnet.zklighter.elliot.ai` | `api.rh.lighter.xyz` |
+| Lighter chain id (signing) | 304 | 466324 |
+| Collateral | USDC | USDG |
+| L1 Priority Transactions | L1CoreMessaging (after the 2026-11-08 split) | on ZkLighter itself |
+
+When a wallet connects, the page looks the address up on both and shows the
+one that has an account, labelled. A switch between the two appears only when
+both have an account, when neither does (a withdrawal can still be parked in
+either contract), or when one lookup failed. The choice is made once per
+address; after that only the user changes it. Action history and unlocked keys
+are dropped on a switch, and a signing key unlocked on one deployment cannot
+sign for the other (`src/lib/environments.ts`, `src/lib/signer.ts`).
+
 Every action is sent to the Lighter API first (an L2 transaction signed in the
 browser with a key derived from the user's wallet). When the API refuses the
 account (blacklist code 52001, permission code 23100, a 403/451 edge block, or
-the API being unreachable) the same action is sent to the Lighter contract on
-Ethereum instead. The user can also force Ethereum-only mode.
+the API being unreachable) the same action is sent to the Lighter contract
+instead (on Ethereum for Lighter, on Robinhood Chain for Lighter RH). The user
+can also force contract-only mode.
 
 ## How it works
 
-| Step | API route (default) | Ethereum fallback |
+| Step | API route (default) | Contract fallback |
 | --- | --- | --- |
 | 0 · Unlock signing | wallet `personal_sign` → seed → Lighter key → `ChangePubKey` (tx 8) | `changePubKey(uint48,uint8,bytes)` |
 | 1 · Cancel orders | `CancelAllOrders` (tx 16) | `cancelAllOrders(uint48)` |
@@ -36,19 +56,51 @@ message → `NewSeedKeyManager` in Lighter's Go signer, compiled to WebAssembly
 registered at API key slot 250 (configurable) so the official apps' slots are
 never touched. Nothing is persisted.
 
+The message is laid out as a Sign-In with Ethereum (EIP-4361) message naming
+the site it is requested from and the signing wallet, with a constant nonce and
+timestamp so the signature stays the same. The key therefore belongs to one
+domain: wallets that understand the format warn when another site asks for a
+signature naming this one, and a copy of the page elsewhere derives a different
+key. Moving the page to a new domain means each user registers a new key (one
+extra signature).
+
+## Security
+
+- **Nothing is stored server-side.** The server is stateless: no database,
+  sessions, cookies or request logs, and no secrets. The platform in front of it
+  may keep its own HTTP logs.
+- **Headers.** Every response carries a Content-Security-Policy (scripts only
+  from this origin, no inline script or `eval`, network access only to this
+  origin plus the origins the build was configured with, no framing), HSTS,
+  `X-Frame-Options: DENY`, `nosniff` and `Referrer-Policy: no-referrer`. The
+  build writes the allowed origins to `dist/csp.json`; `CSP_CONNECT_SRC` adds
+  more at runtime.
+- **Proxy.** `/lighter-api` only forwards GET/POST under `/api/v1/` to one fixed
+  host. It is rate limited per client address, caps POST bodies and concurrent
+  upstream requests, and streams responses instead of buffering them.
+- **Signer binary.** `scripts/build-wasm.sh` is reproducible (pinned lighter-go
+  commit and Go version, `-trimpath`), and `scripts/signer.sha256` records the
+  result. `npm run build` refuses to build when the files in `public/` differ
+  from those hashes, so replacing the signer always shows up as a hash change.
+  To audit: run the script and check `git diff --exit-code public scripts/signer.sha256`.
+- **Slippage.** Closing orders above 10% max slippage needs an explicit
+  confirmation that shows the worst prices and the possible cost.
+
 ## Layout
 
 - `src/` — Vite + React 19 + Tailwind v4 SPA. Design tokens and recipes are
   copied from the Lighter page kit (via the prover-claim page).
 - `src/lib/` — API client, contract ABI, decimal maths, wasm signer wrapper,
   and `plan.ts`, which turns an account snapshot into the exit plan.
-- `src/hooks/useExitAction.ts` — API-first runner with the Ethereum fallback.
+- `src/hooks/useExitAction.ts` — API-first runner with the contract fallback.
+- `src/lib/environments.ts` — the two deployments and which one is active.
 - `server/index.mjs` — dependency-free Node server: serves `dist/`, exposes
-  `/healthz`, and proxies `/lighter-api/*` to the Lighter API so browsers never
-  call Lighter's domain directly.
+  `/healthz`, and proxies `/lighter-api/*` (Lighter) and `/lighter-api-rh/*`
+  (Lighter RH) to the Lighter APIs so browsers never call Lighter's domains
+  directly.
 - `public/lighter-signer.wasm`, `public/wasm_exec.js` — Go signer build. Rebuild
-  with `scripts/build-wasm.sh` (needs Go; both files must come from the same
-  toolchain).
+  with `scripts/build-wasm.sh` (needs the pinned Go version; both files must come
+  from the same toolchain). Hashes live in `scripts/signer.sha256`.
 
 ## Develop
 
@@ -63,8 +115,17 @@ wallet.
 
 ## Configure
 
-See `.env.example`. Build-time `VITE_*` variables are baked into the bundle;
-`PORT` and `LIGHTER_API_URL` are read by the server at runtime.
+See `.env.example`. Build-time `VITE_*` variables are baked into the bundle, so
+never put a secret in one (an RPC URL with an API key becomes public); `PORT`,
+`LIGHTER_API_URL`, `LIGHTER_RH_API_URL` and the proxy limits are read by the server at runtime.
+
+For testing the contract route (on a staging deploy, not production), build
+with `VITE_FORCE_L1_OPTION=1`. The page then shows a "force contract calls"
+switch with two settings. "Trading only" sends closing positions and cancelling
+orders to the contract and leaves everything else on the API. "Everything"
+also sends key registration and every other step that has a contract route, as
+if the API had refused the account. Unstaking and freezing a pool have no
+contract route and keep using the API.
 
 ## Deploy on Railway
 

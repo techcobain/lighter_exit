@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { getAddress, isAddress } from 'viem'
 
 import { setPreviewSource } from '../dev/preview'
-import { BTN_PRIMARY_CLASSNAME, BTN_SECONDARY_CLASSNAME, CARD_CLASSNAME, INPUT_CLASSNAME, LABEL_CLASSNAME } from '../lib/recipes'
+import { BTN_PRIMARY_CLASSNAME, BTN_SECONDARY_CLASSNAME, CARD_CLASSNAME, HELPER_CLASSNAME, INPUT_CLASSNAME, LABEL_CLASSNAME, PROSE_CLASSNAME } from '../lib/recipes'
 
 /** Entry point of ?preview: pick the address and whether to read real data or fixtures. */
 export function PreviewCard({ onStart }: { onStart: (address: `0x${string}`) => void }) {
@@ -19,12 +19,12 @@ export function PreviewCard({ onStart }: { onStart: (address: `0x${string}`) => 
   }
 
   return (
-    <div className={`${CARD_CLASSNAME} flex flex-col gap-5 p-6`}>
+    <div className={`${CARD_CLASSNAME} flex flex-col gap-5 p-6 max-mobile:p-4`}>
       <div className="flex flex-col gap-2">
         <h2 className="text-2xl font-medium tracking-heading text-ink">Preview mode</h2>
-        <p className="max-w-[56ch] text-md leading-2xl text-dim">
+        <p className={`${PROSE_CLASSNAME} text-md leading-2xl text-dim`}>
           Walk through every step without a wallet. Actions are simulated: no message is signed and nothing is sent to
-          Lighter or Ethereum. Enter the address to preview as; it is only kept in this tab.
+          Lighter or any chain. Enter the address to preview as; it is only kept in this tab.
         </p>
       </div>
       <div className="flex flex-col gap-2">
@@ -51,7 +51,7 @@ export function PreviewCard({ onStart }: { onStart: (address: `0x${string}`) => 
           Use sample data
         </button>
       </div>
-      <p className="text-sm leading-md text-faint">
+      <p className={`${PROSE_CLASSNAME} ${HELPER_CLASSNAME}`}>
         Dry run reads the address&apos;s accounts from Lighter and only fakes the actions, so the numbers don&apos;t
         change when you click. Sample data shows a fully loaded main account, a sub-account and an operated pool, and
         the fixtures react to each action.

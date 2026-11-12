@@ -7,10 +7,21 @@ import { useSigningKeys } from '../../hooks/useSigningKeys'
 import cn from '../../lib/cn'
 import { TX_TYPE, UNSTAKE_PERIOD_DAYS } from '../../lib/config'
 import { formatAmount, formatCountdown, formatDateTime, formatUsd } from '../../lib/format'
-import { BTN_PRIMARY_CLASSNAME, BTN_ROW_CLASSNAME, BTN_SECONDARY_CLASSNAME, LABEL_CLASSNAME } from '../../lib/recipes'
+import {
+  BTN_PRIMARY_CLASSNAME,
+  BTN_ROW_FIXED_CLASSNAME,
+  BTN_SECONDARY_CLASSNAME,
+  COL_ACTION_CLASSNAME,
+  COL_NUM_CLASSNAME,
+  COL_STATUS_CLASSNAME,
+  HELPER_CLASSNAME,
+  LABEL_CLASSNAME,
+  PROSE_CLASSNAME,
+  SUBSECTION_CLASSNAME,
+} from '../../lib/recipes'
 import { signUnstakeAssets } from '../../lib/signer'
 import { toMillis } from '../../lib/time'
-import { ActionLine, StatusPill } from '../ActionStatus'
+import { ActionLines, StatusPill } from '../ActionStatus'
 import { Notice, StepCard, Table, type StepState } from '../StepCard'
 
 import type { ExitPlan, PoolShareItem } from '../../lib/plan'
@@ -86,17 +97,17 @@ export function UnstakeStep({
       {stakes.length === 0 && plan.pendingUnlocks.length === 0 ? (
         <Notice>{loading ? 'Checking pool types…' : 'Nothing staked on this account.'}</Notice>
       ) : (
-        <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-4">
           {stakes.length > 0 && (
             <>
               <Table
                 head={
                   <>
                     <th>Pool</th>
-                    <th className="text-right">Shares</th>
-                    <th className="text-right">Principal</th>
-                    <th className="text-right">Status</th>
-                    <th />
+                    <th className={COL_NUM_CLASSNAME}>Shares</th>
+                    <th className={COL_NUM_CLASSNAME}>Principal</th>
+                    <th className={COL_STATUS_CLASSNAME}>Status</th>
+                    <th className={COL_ACTION_CLASSNAME} />
                   </>
                 }
               >
@@ -105,21 +116,22 @@ export function UnstakeStep({
                   const done = state?.status === 'executed'
                   return (
                     <tr key={s.id} className={cn(done && 'opacity-60')}>
-                      <td>
+                      <td data-cell="primary">
                         <span className="font-medium text-ink">{s.poolName}</span>
-                        <span className="ml-2 text-2xs text-meta">#{s.poolIndex}</span>
+                        <span className="ml-2 text-2xs text-meta max-mobile:ml-0 max-mobile:block">#{s.poolIndex}</span>
                       </td>
-                      <td className="text-right font-mono tabular-nums text-ink">{formatAmount(s.shares.toString(), 0)}</td>
-                      <td className="text-right font-mono tabular-nums text-dim">{formatUsd(s.principal)}</td>
-                      <td className="text-right">
+                      <td data-label="Shares" className="text-right font-mono tabular-nums text-ink">{formatAmount(s.shares.toString(), 0)}</td>
+                      <td data-label="Principal" className="text-right font-mono tabular-nums text-dim">{formatUsd(s.principal)}</td>
+                      <td data-label="Status" className="text-right">
                         <StatusPill state={state} />
                       </td>
-                      <td className="text-right">
+                      <td data-cell="action" className="text-right">
                         <button
                           type="button"
                           disabled={!canAct || !keyReady || isInFlight(state) || done}
+                          title={!canAct ? (reason ?? undefined) : undefined}
                           onClick={() => void run(request(s))}
-                          className={cn(BTN_SECONDARY_CLASSNAME, BTN_ROW_CLASSNAME)}
+                          className={cn(BTN_SECONDARY_CLASSNAME, BTN_ROW_FIXED_CLASSNAME)}
                         >
                           {done ? 'Unstaked' : 'Unstake'}
                         </button>
@@ -128,31 +140,28 @@ export function UnstakeStep({
                   )
                 })}
               </Table>
-              <div className="flex flex-col gap-2">
-                {stakes.map((s) => (actions[s.id] ? <ActionLine key={s.id} state={actions[s.id]} /> : null))}
-              </div>
+              <ActionLines states={stakes.map((s) => actions[s.id])} />
               <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="button"
                   disabled={!canAct || !keyReady || pending.length === 0 || anyInFlight}
+                  title={!canAct ? (reason ?? undefined) : undefined}
                   onClick={() => void runSequence(pending.map(request))}
                   className={BTN_PRIMARY_CLASSNAME}
                 >
                   Unstake everything
                 </button>
-                {!canAct && reason ? (
-                  <span className="text-sm text-faint">{reason}</span>
-                ) : !keyReady ? (
-                  <span className="text-sm text-faint">
+                {canAct && !keyReady && (
+                  <span className={HELPER_CLASSNAME}>
                     {mode === 'l1' ? 'Switch back to the API in step 0 to unstake.' : 'Unlock API signing in step 0 first.'}
                   </span>
-                ) : null}
+                )}
               </div>
             </>
           )}
 
           {plan.pendingUnlocks.length > 0 && (
-            <div className="flex flex-col gap-2">
+            <div className={cn(SUBSECTION_CLASSNAME, stakes.length === 0 && 'border-t-0 pt-0')}>
               <span className={LABEL_CLASSNAME}>Unlocking</span>
               <Table
                 head={
@@ -160,7 +169,7 @@ export function UnstakeStep({
                     <th>Asset</th>
                     <th className="text-right">Amount</th>
                     <th className="text-right">Unlocks</th>
-                    <th className="text-right">Remaining</th>
+                    <th className={COL_NUM_CLASSNAME}>Remaining</th>
                   </>
                 }
               >
@@ -169,17 +178,17 @@ export function UnstakeStep({
                   const remaining = toMillis(u.unlock_timestamp) - now
                   return (
                     <tr key={`${u.asset_index}-${u.unlock_timestamp}-${i}`}>
-                      <td className="font-medium text-ink">{asset?.symbol ?? `asset ${u.asset_index}`}</td>
-                      <td className="text-right font-mono tabular-nums text-ink">{formatAmount(u.amount, asset?.decimals ?? 6)}</td>
-                      <td className="text-right text-dim">{formatDateTime(u.unlock_timestamp)}</td>
-                      <td className={cn('text-right font-mono tabular-nums', remaining <= 0 ? 'text-success' : 'text-warn')}>
+                      <td data-cell="primary" className="font-medium text-ink">{asset?.symbol ?? `asset ${u.asset_index}`}</td>
+                      <td data-label="Amount" className="text-right font-mono tabular-nums text-ink">{formatAmount(u.amount, asset?.decimals ?? 6)}</td>
+                      <td data-label="Unlocks" className="text-right text-dim">{formatDateTime(u.unlock_timestamp)}</td>
+                      <td data-label="Remaining" className={cn('text-right font-mono tabular-nums', remaining <= 0 ? 'text-success' : 'text-warn')}>
                         {remaining <= 0 ? 'ready' : formatCountdown(remaining)}
                       </td>
                     </tr>
                   )
                 })}
               </Table>
-              <p className="text-sm leading-md text-faint">
+              <p className={cn(PROSE_CLASSNAME, HELPER_CLASSNAME)}>
                 When the timer ends the assets are credited to this account&apos;s spot balance automatically. Come back then and withdraw them in step 5.
               </p>
             </div>

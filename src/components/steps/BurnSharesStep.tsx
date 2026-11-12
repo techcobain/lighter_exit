@@ -4,10 +4,17 @@ import { accountKey } from '../../hooks/useLighterData'
 import cn from '../../lib/cn'
 import { TX_TYPE } from '../../lib/config'
 import { accountTypeLabel, formatAmount, formatUsd } from '../../lib/format'
-import { BTN_PRIMARY_CLASSNAME, BTN_ROW_CLASSNAME, BTN_SECONDARY_CLASSNAME } from '../../lib/recipes'
+import {
+  BTN_PRIMARY_CLASSNAME,
+  BTN_ROW_FIXED_CLASSNAME,
+  BTN_SECONDARY_CLASSNAME,
+  COL_ACTION_CLASSNAME,
+  COL_NUM_CLASSNAME,
+  COL_STATUS_CLASSNAME,
+} from '../../lib/recipes'
 import { signBurnShares } from '../../lib/signer'
 import { assertFits, UINT64_MAX } from '../../lib/units'
-import { ActionLine, StatusPill } from '../ActionStatus'
+import { ActionLines, StatusPill } from '../ActionStatus'
 import { Notice, StepCard, Table, type StepState } from '../StepCard'
 
 import type { ExitPlan, PoolShareItem } from '../../lib/plan'
@@ -69,10 +76,10 @@ export function BurnSharesStep({
             head={
               <>
                 <th>Pool</th>
-                <th className="text-right">Shares</th>
-                <th className="text-right">Principal</th>
-                <th className="text-right">Status</th>
-                <th />
+                <th className={COL_NUM_CLASSNAME}>Shares</th>
+                <th className={COL_NUM_CLASSNAME}>Principal</th>
+                <th className={COL_STATUS_CLASSNAME}>Status</th>
+                <th className={COL_ACTION_CLASSNAME} />
               </>
             }
           >
@@ -81,23 +88,24 @@ export function BurnSharesStep({
               const done = state?.status === 'executed'
               return (
                 <tr key={s.id} className={cn(done && 'opacity-60')}>
-                  <td>
+                  <td data-cell="primary">
                     <span className="font-medium text-ink">{s.poolName}</span>
-                    <span className="ml-2 text-2xs text-meta">
+                    <span className="ml-2 text-2xs text-meta max-mobile:ml-0 max-mobile:block">
                       {s.poolType !== null ? accountTypeLabel(s.poolType) : ''} · #{s.poolIndex}
                     </span>
                   </td>
-                  <td className="text-right font-mono tabular-nums text-ink">{formatAmount(s.shares.toString(), 0)}</td>
-                  <td className="text-right font-mono tabular-nums text-dim">{formatUsd(s.principal)}</td>
-                  <td className="text-right">
+                  <td data-label="Shares" className="text-right font-mono tabular-nums text-ink">{formatAmount(s.shares.toString(), 0)}</td>
+                  <td data-label="Principal" className="text-right font-mono tabular-nums text-dim">{formatUsd(s.principal)}</td>
+                  <td data-label="Status" className="text-right">
                     <StatusPill state={state} />
                   </td>
-                  <td className="text-right">
+                  <td data-cell="action" className="text-right">
                     <button
                       type="button"
                       disabled={!canAct || isInFlight(state) || done}
+                      title={!canAct ? (reason ?? undefined) : undefined}
                       onClick={() => void run(request(s))}
-                      className={cn(BTN_SECONDARY_CLASSNAME, BTN_ROW_CLASSNAME)}
+                      className={cn(BTN_SECONDARY_CLASSNAME, BTN_ROW_FIXED_CLASSNAME)}
                     >
                       {done ? 'Burned' : 'Burn'}
                     </button>
@@ -106,19 +114,17 @@ export function BurnSharesStep({
               )
             })}
           </Table>
-          <div className="flex flex-col gap-2">
-            {items.map((s) => (actions[s.id] ? <ActionLine key={s.id} state={actions[s.id]} /> : null))}
-          </div>
+          <ActionLines states={items.map((s) => actions[s.id])} />
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
               disabled={!canAct || pending.length === 0 || anyInFlight}
+              title={!canAct ? (reason ?? undefined) : undefined}
               onClick={() => void runSequence(pending.map(request))}
               className={BTN_PRIMARY_CLASSNAME}
             >
               Burn all {pending.length > 1 ? `(${pending.length})` : ''}
             </button>
-            {!canAct && reason && <span className="text-sm text-faint">{reason}</span>}
           </div>
         </div>
       )}

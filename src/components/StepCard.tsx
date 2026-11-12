@@ -1,7 +1,7 @@
 import { type ReactNode } from 'react'
 
 import cn from '../lib/cn'
-import { PAGE_CRISP_SURFACE_CLASSNAME } from '../lib/recipes'
+import { PAGE_CRISP_SURFACE_CLASSNAME, PROSE_CLASSNAME } from '../lib/recipes'
 
 export type StepState = 'todo' | 'active' | 'done' | 'empty' | 'loading'
 
@@ -26,53 +26,49 @@ export function StepCard({
   title,
   description,
   state,
-  aside,
   children,
 }: {
   step: number
   title: string
   description?: ReactNode
   state: StepState
-  aside?: ReactNode
   children?: ReactNode
 }) {
   return (
     <section
       className={cn(
         PAGE_CRISP_SURFACE_CLASSNAME,
-        'flex flex-col gap-5 rounded-panel p-6',
+        'flex flex-col gap-5 rounded-panel p-6 max-mobile:p-4',
         state === 'empty' && 'opacity-70',
       )}
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-4">
-          <span
-            className={cn(
-              'mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-card border-[0.5px] font-mono text-sm tabular-nums',
-              state === 'done'
-                ? 'border-success/40 bg-success/10 text-success'
-                : 'border-line bg-surface text-meta',
-            )}
-          >
-            {state === 'done' ? '✓' : step}
-          </span>
-          <div className="flex flex-col gap-1.5">
-            <h2 className="text-xl font-medium tracking-heading text-ink">{title}</h2>
-            {description && <p className="max-w-[60ch] text-sm leading-md text-dim">{description}</p>}
+      {/* Everything in the card shares one left edge: the badge sits on the title line, not in a gutter. */}
+      <header className="flex flex-col gap-2.5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <span
+              className={cn(
+                'flex size-7 shrink-0 items-center justify-center rounded-card border-[0.5px] font-mono text-sm tabular-nums',
+                state === 'done'
+                  ? 'border-success/40 bg-success/10 text-success'
+                  : 'border-line bg-surface text-meta',
+              )}
+            >
+              {state === 'done' ? '✓' : step}
+            </span>
+            <h2 className="min-w-0 pt-0.5 text-xl font-medium tracking-heading text-ink">{title}</h2>
           </div>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-2">
           <span
             className={cn(
-              'rounded-pill border-[0.5px] px-2 py-1 text-2xs font-medium tracking-caps uppercase whitespace-nowrap',
+              'mt-0.5 shrink-0 rounded-pill border-[0.5px] px-2 py-1 text-2xs font-medium tracking-caps uppercase whitespace-nowrap',
               STATE_CLASS[state],
             )}
           >
             {STATE_LABEL[state]}
           </span>
-          {aside}
         </div>
-      </div>
+        {description && <p className={cn(PROSE_CLASSNAME, 'text-sm leading-md text-dim')}>{description}</p>}
+      </header>
       {children}
     </section>
   )
@@ -99,19 +95,24 @@ export function Notice({
   )
 }
 
+/**
+ * Data table for a step. Lines and text stop at the card's padding edge. On
+ * phones each row becomes a small stacked block (see .stack-table in
+ * index.css): the cell marked data-cell="primary" and the one marked
+ * data-cell="action" share the first line, and every cell with a data-label
+ * follows as a "label … value" line. data-mobile="hide" drops a cell there.
+ */
 export function Table({ head, children }: { head: ReactNode; children: ReactNode }) {
   return (
-    <div className="-mx-2 overflow-x-auto">
-      <table className="w-full min-w-[560px] border-collapse text-sm">
-        <thead>
-          <tr className="text-left text-2xs tracking-caps text-meta uppercase [&>th]:px-2 [&>th]:pb-2 [&>th]:font-medium">
-            {head}
-          </tr>
-        </thead>
-        <tbody className="[&>tr]:border-t-[0.5px] [&>tr]:border-line [&>tr>td]:px-2 [&>tr>td]:py-2.5 [&>tr>td]:align-middle">
-          {children}
-        </tbody>
-      </table>
-    </div>
+    <table className="stack-table w-full border-collapse border-b-[0.5px] border-line text-sm">
+      <thead>
+        <tr className="text-left text-2xs tracking-caps text-meta uppercase [&>th]:px-2 [&>th]:pb-2 [&>th]:font-medium [&>th]:whitespace-nowrap [&>th:first-child]:pl-0 [&>th:last-child]:pr-0">
+          {head}
+        </tr>
+      </thead>
+      <tbody className="[&>tr]:border-t-[0.5px] [&>tr]:border-line [&>tr>td]:px-2 [&>tr>td]:py-2.5 [&>tr>td]:align-middle [&>tr>td:first-child]:pl-0 [&>tr>td:last-child]:pr-0">
+        {children}
+      </tbody>
+    </table>
   )
 }

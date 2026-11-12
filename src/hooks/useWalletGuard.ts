@@ -1,14 +1,17 @@
-import { mainnet } from 'wagmi/chains'
 import { useAccount } from 'wagmi'
 
 import { isPreview } from '../dev/preview'
 
+import { useEnvironment } from './useEnvironment'
+
 /**
  * Whether the connected wallet is allowed to act on a given Lighter account:
- * it must be the account's L1 owner and sit on Ethereum mainnet.
+ * it must be the account's L1 owner and sit on the deployment's L1 chain
+ * (Ethereum for Lighter, Robinhood Chain for Lighter RH).
  */
 export function useWalletGuard(ownerAddress: string | undefined) {
   const { address, chainId, isConnected } = useAccount()
+  const env = useEnvironment()
   if (isPreview) return { ready: true, reason: null }
   const owner = ownerAddress?.toLowerCase()
   const connected = address?.toLowerCase()
@@ -16,8 +19,8 @@ export function useWalletGuard(ownerAddress: string | undefined) {
   if (owner && connected !== owner) {
     return { ready: false, reason: 'Connected wallet is not the owner of this account.' }
   }
-  if (chainId !== mainnet.id) {
-    return { ready: false, reason: 'Your wallet will be asked to switch to Ethereum mainnet.', wrongChain: true }
+  if (chainId !== env.chain.id) {
+    return { ready: false, reason: `Your wallet will be asked to switch to ${env.l1Name}.`, wrongChain: true }
   }
   return { ready: true, reason: null }
 }

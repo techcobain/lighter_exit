@@ -1,10 +1,11 @@
+import { useEnvironment } from '../../hooks/useEnvironment'
 import { useActions, isInFlight } from '../../hooks/useActions'
 import { useExitAction } from '../../hooks/useExitAction'
 import { accountKey } from '../../hooks/useLighterData'
 import { useSigningKeys } from '../../hooks/useSigningKeys'
 import { API_KEY_INDEX, POOL_STATUS, ROUTE_PERP, ROUTE_SPOT, TX_TYPE } from '../../lib/config'
 import { formatAmount, formatUsd } from '../../lib/format'
-import { BTN_PRIMARY_CLASSNAME, BTN_SECONDARY_CLASSNAME, LABEL_CLASSNAME } from '../../lib/recipes'
+import { BTN_PRIMARY_CLASSNAME, BTN_SECONDARY_CLASSNAME, HELPER_CLASSNAME, LABEL_CLASSNAME, PROSE_CLASSNAME, SUBSECTION_CLASSNAME } from '../../lib/recipes'
 import { signBurnShares, signTransfer, signUpdatePublicPool } from '../../lib/signer'
 import { isPositiveDecimal, toBaseUnits } from '../../lib/units'
 import { ActionLine } from '../ActionStatus'
@@ -34,6 +35,7 @@ export function PoolWindDownStep({
   reason: string | null
 }) {
   const { actions } = useActions()
+  const collateral = useEnvironment().collateralSymbol
   const { keys, mode } = useSigningKeys()
   const { run } = useExitAction()
   const info = pool.pool_info
@@ -51,7 +53,7 @@ export function PoolWindDownStep({
   const totalShares = BigInt(info?.total_shares ?? 0)
   const remaining = isPositiveDecimal(pool.available_balance) ? pool.available_balance : '0'
   const hasRemaining = isPositiveDecimal(remaining)
-  // Once every share is gone, whatever USDC is left (fees, rounding) may be moved out by the operator.
+  // Once every share is gone, whatever collateral is left (fees, rounding) may be moved out by the operator.
   const canSweep = frozen && totalShares === 0n && hasRemaining
   const poolKeyReady = mode === 'api' && keys[pool.index]?.stage === 'registered'
 
@@ -69,7 +71,7 @@ export function PoolWindDownStep({
     if (masterIndex === undefined || !canSweep) return
     void run({
       id: sweepId,
-      label: 'Move leftover USDC to main account',
+      label: `Move leftover ${collateral} to main account`,
       accountIndex: pool.index,
       l2: {
         txType: TX_TYPE.TRANSFER,
@@ -157,7 +159,7 @@ export function PoolWindDownStep({
             <SigningKeyCard accountIndex={masterIndex} label={`main account #${masterIndex}`} canAct={canAct} reason={reason} compact />
           )}
 
-          <div className="flex flex-col gap-3">
+          <div className={SUBSECTION_CLASSNAME}>
             <span className={LABEL_CLASSNAME}>1 · Freeze</span>
             {frozen ? (
               <p className="text-sm text-success">Pool is frozen. No new deposits; only burns are allowed.</p>
@@ -170,13 +172,14 @@ export function PoolWindDownStep({
                   <button
                     type="button"
                     disabled={!canAct || !masterKeyReady || !flat || isInFlight(freezeState)}
+                    title={!canAct ? (reason ?? undefined) : undefined}
                     onClick={freeze}
                     className={BTN_PRIMARY_CLASSNAME}
                   >
                     Freeze pool
                   </button>
                   {!masterKeyReady && canAct && (
-                    <span className="text-sm text-faint">
+                    <span className={HELPER_CLASSNAME}>
                       {mode === 'l1' ? 'Freezing needs the API; switch back to it.' : 'Unlock API signing for the main account first.'}
                     </span>
                   )}
@@ -186,13 +189,13 @@ export function PoolWindDownStep({
             )}
           </div>
 
-          <div className="flex flex-col gap-3">
+          <div className={SUBSECTION_CLASSNAME}>
             <span className={LABEL_CLASSNAME}>2 · Burn your operator shares</span>
             {operatorShares === 0n ? (
               <p className="text-sm text-success">No operator shares left in this pool.</p>
             ) : (
               <>
-                <p className="max-w-[60ch] text-sm leading-md text-dim">
+                <p className={`${PROSE_CLASSNAME} text-sm leading-md text-dim`}>
                   Burns all {formatAmount(operatorShares.toString(), 0)} operator shares back to your main account&apos;s
                   perps collateral. {!frozen && 'While the pool is active, Lighter keeps you above the minimum operator share rate, so the burn may be rejected until you freeze.'}
                 </p>
@@ -200,12 +203,12 @@ export function PoolWindDownStep({
                   <button
                     type="button"
                     disabled={!canAct || isInFlight(burnState) || (mode === 'api' && !masterKeyReady)}
+                    title={!canAct ? (reason ?? undefined) : undefined}
                     onClick={burn}
                     className={frozen ? BTN_PRIMARY_CLASSNAME : BTN_SECONDARY_CLASSNAME}
                   >
                     Burn operator shares
                   </button>
-                  {!canAct && reason && <span className="text-sm text-faint">{reason}</span>}
                 </div>
                 <ActionLine state={burnState} />
               </>
@@ -221,17 +224,17 @@ export function PoolWindDownStep({
           )}
 
           {canSweep && (
-            <div className="flex flex-col gap-3">
+            <div className={SUBSECTION_CLASSNAME}>
               <span className={LABEL_CLASSNAME}>3 · Move the leftover out</span>
-              <p className="max-w-[60ch] text-sm leading-md text-dim">
-                All shares are burned and {formatUsd(remaining)} USDC is left in the pool (fees and rounding). Lighter allows a frozen, share-less pool
+              <p className={`${PROSE_CLASSNAME} text-sm leading-md text-dim`}>
+                All shares are burned and {formatUsd(remaining)} {collateral} is left in the pool (fees and rounding). Lighter allows a frozen, share-less pool
                 to transfer it; this sends it to your main account&apos;s spot balance, signed with the pool&apos;s key (step 0 above).
               </p>
               <div className="flex flex-wrap items-center gap-3">
                 <button type="button" disabled={!canAct || !poolKeyReady || isInFlight(sweepState)} onClick={sweep} className={BTN_PRIMARY_CLASSNAME}>
                   Move {formatUsd(remaining)} to main account
                 </button>
-                {!poolKeyReady && canAct && <span className="text-sm text-faint">Unlock API signing for the pool first.</span>}
+                {!poolKeyReady && canAct && <span className={HELPER_CLASSNAME}>Unlock API signing for the pool first.</span>}
               </div>
               <ActionLine state={sweepState} />
             </div>

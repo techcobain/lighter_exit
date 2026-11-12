@@ -4,6 +4,7 @@ import { useQueries, useQuery } from '@tanstack/react-query'
 
 import { isPreview } from '../dev/preview'
 import { API_KEY_INDEX } from '../lib/config'
+import { activeEnvironment, type EnvironmentId } from '../lib/environments'
 import { buildPlan } from '../lib/plan'
 import { createAuthToken } from '../lib/signer'
 import {
@@ -18,8 +19,13 @@ import {
 
 import type { DetailedAccount, PoolInfo } from '../lib/types'
 
-export const accountsKey = (address: string | undefined) => ['accounts', address?.toLowerCase()] as const
-export const accountKey = (index: number) => ['account', index] as const
+// Every key carries the deployment it was read from: account indexes, market
+// ids and asset ids all repeat across deployments with different meanings.
+const envId = (): EnvironmentId => activeEnvironment().id
+
+export const accountsKey = (address: string | undefined, env: EnvironmentId = envId()) =>
+  ['accounts', env, address?.toLowerCase()] as const
+export const accountKey = (index: number) => ['account', envId(), index] as const
 
 export function useAccountsByAddress(address: string | undefined) {
   return useQuery({
@@ -37,7 +43,7 @@ export function useAccountsByAddress(address: string | undefined) {
  */
 export function useAccountNames(address: string | undefined, tokenAccountIndex: number | undefined) {
   return useQuery({
-    queryKey: ['accountNames', address?.toLowerCase(), tokenAccountIndex],
+    queryKey: ['accountNames', envId(), address?.toLowerCase(), tokenAccountIndex],
     queryFn: async () => {
       const token = isPreview ? 'preview' : (await createAuthToken(tokenAccountIndex!, API_KEY_INDEX)).token
       return fetchAccountNames(address!, token)
@@ -82,7 +88,7 @@ export function useLiveAccounts(accounts: DetailedAccount[]): DetailedAccount[] 
 
 export function useMarkets() {
   return useQuery({
-    queryKey: ['markets'],
+    queryKey: ['markets', envId()],
     queryFn: fetchMarkets,
     staleTime: 30_000,
     refetchInterval: 60_000,
@@ -90,12 +96,12 @@ export function useMarkets() {
 }
 
 export function useAssets() {
-  return useQuery({ queryKey: ['assets'], queryFn: fetchAssets, staleTime: 5 * 60_000 })
+  return useQuery({ queryKey: ['assets', envId()], queryFn: fetchAssets, staleTime: 5 * 60_000 })
 }
 
 export function useWithdrawalDelay() {
   return useQuery({
-    queryKey: ['withdrawalDelay'],
+    queryKey: ['withdrawalDelay', envId()],
     queryFn: fetchWithdrawalDelaySeconds,
     staleTime: 10 * 60_000,
   })
@@ -104,7 +110,7 @@ export function useWithdrawalDelay() {
 export function usePools(indexes: number[]) {
   const results = useQueries({
     queries: indexes.map((index) => ({
-      queryKey: ['pool', index],
+      queryKey: ['pool', envId(), index],
       queryFn: () => fetchPoolInfo(index),
       staleTime: Infinity,
     })),

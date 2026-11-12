@@ -3,7 +3,7 @@
 // functions the official web app uses; each returns a function that yields a
 // Promise, hence the double call below.
 
-import { LIGHTER_CHAIN_ID } from './config'
+import { activeEnvironment } from './environments'
 
 type WasmResult<T> = T | { error: string }
 
@@ -38,7 +38,13 @@ declare global {
 }
 
 let loading: Promise<void> | null = null
-const clients = new Set<number>()
+/**
+ * Lighter chain id each account's signer was created for. The wasm module
+ * keeps one signer per account index, and account indexes repeat across
+ * deployments, so this is what stops a key unlocked on one deployment from
+ * signing for the same index on another.
+ */
+const clients = new Map<number, number>()
 
 function loadScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -73,9 +79,17 @@ export function loadSigner(): Promise<void> {
   return loading
 }
 
-/** Whether a signer for this account was created in this page session. */
+/** Whether a signer for this account on the active deployment was created in this page session. */
 export function hasClient(accountIndex: number): boolean {
-  return clients.has(accountIndex)
+  return clients.get(accountIndex) === activeEnvironment().lighterChainId
+}
+
+/** Like call(), for functions that sign with an account's cached signer. */
+function callFor<T>(accountIndex: number, fn: WasmFn<T> | undefined, name: string, ...args: unknown[]): Promise<T> {
+  if (!hasClient(accountIndex)) {
+    return Promise.reject(new Error(`API signing is not unlocked for account #${accountIndex} on ${activeEnvironment().name}`))
+  }
+  return call(fn, name, accountIndex, ...args)
 }
 
 async function call<T>(fn: WasmFn<T> | undefined, name: string, ...args: unknown[]): Promise<T> {
@@ -98,26 +112,29 @@ export interface DerivedKey {
  * Derives a Lighter signing key from a wallet signature (the seed) and caches a
  * signer for `accountIndex` in the wasm module. `nonce` and `apiKeyIndex` are
  * baked into the registration message, so pass the same values to
- * signChangePubKey afterwards.
+ * signChangePubKey afterwards. `lighterChainId` ties every signature the
+ * signer makes to one deployment.
  */
 export async function createClientFromSeed(params: {
   seedHex: string
+  lighterChainId: number
   accountIndex: number
   nonce: number
   apiKeyIndex: number
 }): Promise<DerivedKey> {
   await loadSigner()
+  clients.delete(params.accountIndex)
   const res = await call(
     window._createClient,
     '_createClient',
     params.seedHex,
-    LIGHTER_CHAIN_ID,
+    params.lighterChainId,
     params.accountIndex,
     params.nonce,
     params.apiKeyIndex,
   )
   if (!res.pubKeySuccess || !res.body) throw new Error('signer could not build the registration message')
-  clients.add(params.accountIndex)
+  clients.set(params.accountIndex, params.lighterChainId)
   return { publicKey: res.pk.replace(/^0x/, '').toLowerCase(), registrationMessage: res.body }
 }
 
@@ -127,7 +144,7 @@ export function signChangePubKey(p: {
   nonce: number
   apiKeyIndex: number
 }): Promise<SignedTx> {
-  return call(window._signChangePubKey, '_signChangePubKey', p.accountIndex, p.l1Signature, p.nonce, p.apiKeyIndex)
+  return callFor(p.accountIndex, window._signChangePubKey, '_signChangePubKey', p.l1Signature, p.nonce, p.apiKeyIndex)
 }
 
 export const ORDER_TYPE_MARKET_L2 = 1
@@ -144,11 +161,7 @@ export function signCreateOrder(p: {
   reduceOnly: boolean
   nonce: number
 }): Promise<SignedTx> {
-  return call(
-    window._signCreateOrder,
-    '_signCreateOrder',
-    p.accountIndex,
-    p.marketIndex,
+  return callFor(p.accountIndex, window._signCreateOrder, '_signCreateOrder', p.marketIndex,
     p.clientOrderIndex,
     p.baseAmount.toString(),
     p.price.toString(),
@@ -163,7 +176,7 @@ export function signCreateOrder(p: {
 }
 
 export function signCancelAllOrders(p: { accountIndex: number; nonce: number }): Promise<SignedTx> {
-  return call(window._signCancelAllOrders, '_signCancelAllOrders', p.accountIndex, CANCEL_ALL_IMMEDIATE, 0, p.nonce)
+  return callFor(p.accountIndex, window._signCancelAllOrders, '_signCancelAllOrders', CANCEL_ALL_IMMEDIATE, 0, p.nonce)
 }
 
 export function signBurnShares(p: {
@@ -172,7 +185,7 @@ export function signBurnShares(p: {
   shareAmount: bigint
   nonce: number
 }): Promise<SignedTx> {
-  return call(window._signBurnShares, '_signBurnShares', p.accountIndex, p.publicPoolIndex, p.shareAmount.toString(), p.nonce)
+  return callFor(p.accountIndex, window._signBurnShares, '_signBurnShares', p.publicPoolIndex, p.shareAmount.toString(), p.nonce)
 }
 
 export function signWithdraw(p: {
@@ -182,7 +195,7 @@ export function signWithdraw(p: {
   amount: bigint
   nonce: number
 }): Promise<SignedTx> {
-  return call(window._signWithdraw, '_signWithdraw', p.accountIndex, p.assetIndex, p.routeType, p.amount.toString(), p.nonce)
+  return callFor(p.accountIndex, window._signWithdraw, '_signWithdraw', p.assetIndex, p.routeType, p.amount.toString(), p.nonce)
 }
 
 export function signUnstakeAssets(p: {
@@ -191,7 +204,7 @@ export function signUnstakeAssets(p: {
   shareAmount: bigint
   nonce: number
 }): Promise<SignedTx> {
-  return call(window._signUnstakeAssets, '_signUnstakeAssets', p.accountIndex, p.stakingPoolIndex, p.shareAmount.toString(), p.nonce)
+  return callFor(p.accountIndex, window._signUnstakeAssets, '_signUnstakeAssets', p.stakingPoolIndex, p.shareAmount.toString(), p.nonce)
 }
 
 /** Signed by the pool operator's main account, not the pool account. */
@@ -203,11 +216,7 @@ export function signUpdatePublicPool(p: {
   minOperatorShareRate: number
   nonce: number
 }): Promise<SignedTx> {
-  return call(
-    window._signUpdatePublicPool,
-    '_signUpdatePublicPool',
-    p.accountIndex,
-    p.publicPoolIndex,
+  return callFor(p.accountIndex, window._signUpdatePublicPool, '_signUpdatePublicPool', p.publicPoolIndex,
     p.status,
     p.operatorFee,
     p.minOperatorShareRate,
@@ -230,11 +239,7 @@ export function signTransfer(p: {
   nonce: number
   apiKeyIndex: number
 }): Promise<SignedTx> {
-  return call(
-    window._signTransfer,
-    '_signTransfer',
-    p.accountIndex,
-    '',
+  return callFor(p.accountIndex, window._signTransfer, '_signTransfer', '',
     p.nonce,
     p.apiKeyIndex,
     p.toAccountIndex,
@@ -248,20 +253,44 @@ export function signTransfer(p: {
 
 /** Short-lived bearer token for Lighter's authenticated reads, signed with the derived key. */
 export function createAuthToken(accountIndex: number, apiKeyIndex: number): Promise<{ token: string; deadline: number }> {
-  return call(window._createAuthToken, '_createAuthToken', accountIndex, apiKeyIndex)
+  return callFor(accountIndex, window._createAuthToken, '_createAuthToken', apiKeyIndex)
 }
 
-/** The message a wallet signs to seed the derived key. Deterministic per account and slot. */
-export function keyDerivationMessage(accountIndex: number, apiKeyIndex: number): string {
+/**
+ * The message a wallet signs to seed the derived key. Deterministic per site,
+ * wallet, deployment, account and slot.
+ *
+ * It is laid out as a Sign-In with Ethereum (EIP-4361) message so the site it
+ * was requested from is part of what gets signed: wallets that understand the
+ * format warn when another site asks for a signature naming this one, and a
+ * copy of this page on a different domain derives a different, unregistered key.
+ * Nonce and timestamp are constants on purpose: the signature must come out the
+ * same every time, because it is the key's seed.
+ */
+export function keyDerivationMessage(p: {
+  /** window.location.host of the page asking. */
+  host: string
+  /** window.location.origin of the page asking. */
+  origin: string
+  /** Checksummed address of the signing wallet. */
+  address: string
+  accountIndex: number
+  apiKeyIndex: number
+  /** Deployment the key is for: its name, Lighter chain id and L1 chain id. */
+  environmentName: string
+  lighterChainId: number
+  l1ChainId: number
+}): string {
   return [
-    'Lighter Exit',
+    `${p.host} wants you to sign in with your Ethereum account:`,
+    p.address,
     '',
-    'Sign this message to derive a signing key that this page uses to send close, exit and withdrawal requests to Lighter on your behalf.',
+    `Derive the Lighter Exit signing key for account ${p.accountIndex} on ${p.environmentName} (API key ${p.apiKeyIndex}, Lighter chain ${p.lighterChainId}). This page uses it to send close, exit and withdrawal requests to Lighter on your behalf. Signing sends no transaction and costs no gas. Only sign this on ${p.host}.`,
     '',
-    `Account index: ${accountIndex}`,
-    `API key index: ${apiKeyIndex}`,
-    `Lighter chain: ${LIGHTER_CHAIN_ID}`,
-    '',
-    'Signing does not send a transaction or cost gas. Only sign this on the Lighter Exit page.',
+    `URI: ${p.origin}`,
+    'Version: 1',
+    `Chain ID: ${p.l1ChainId}`,
+    `Nonce: LighterExit${p.lighterChainId}x${p.accountIndex}x${p.apiKeyIndex}`,
+    'Issued At: 2026-01-01T00:00:00Z',
   ].join('\n')
 }
