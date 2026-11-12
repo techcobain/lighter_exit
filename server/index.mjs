@@ -1,7 +1,8 @@
 // Production server: serves the built SPA from dist/ and proxies the Lighter
 // REST APIs (/lighter-api for Lighter, /lighter-api-rh for Lighter on Robinhood
 // Chain) so the browser never has to reach Lighter's domains directly (useful
-// for users whose region is blocked from them).
+// for users whose region is blocked from them). The proxy only forwards the
+// reads and transaction types listed in policy.mjs; orders are not among them.
 //
 // Zero dependencies on purpose — only Node 22 built-ins.
 import http from 'node:http'
@@ -10,6 +11,8 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
+
+import { ALLOWED_READS, SEND_TX_PATH, checkProxyRequest, parseAllowedTxTypes } from './policy.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DIST = path.resolve(__dirname, '..', 'dist')
@@ -21,6 +24,8 @@ const PROXIES = {
   '/lighter-api-rh': upstream('LIGHTER_RH_API_URL', 'https://api.rh.lighter.xyz'),
 }
 const PROXY_TIMEOUT_MS = 30_000
+// Throws on a malformed list, so a typo stops the server instead of silently changing what is relayed.
+const ALLOWED_TX_TYPES = parseAllowedTxTypes(process.env.PROXY_ALLOWED_TX_TYPES)
 
 const envNumber = (name, fallback) => {
   const n = Number(process.env[name])
@@ -254,8 +259,9 @@ async function proxy(req, res, url, prefix) {
     return
   }
   const upstreamPath = url.pathname.slice(prefix.length)
-  if (!upstreamPath.startsWith('/api/v1/')) {
-    res.writeHead(404, { 'content-type': 'application/json' }).end('{"error":"not found"}')
+  // Refuse anything off the allowlist before spending rate-limit budget or reading a body.
+  if (req.method === 'GET' ? !ALLOWED_READS.has(upstreamPath) : upstreamPath !== SEND_TX_PATH) {
+    sendJson(res, 404, 'This server does not relay that endpoint.')
     return
   }
 
@@ -268,11 +274,6 @@ async function proxy(req, res, url, prefix) {
     sendJson(res, 503, 'Server busy, try again shortly.', { 'retry-after': '2' })
     return
   }
-
-  const target = `${PROXIES[prefix]}${upstreamPath}${url.search}`
-  const headers = { accept: 'application/json' }
-  if (req.headers['content-type']) headers['content-type'] = req.headers['content-type']
-  if (req.headers.authorization) headers.authorization = req.headers.authorization
 
   let body
   if (req.method === 'POST') {
@@ -287,8 +288,21 @@ async function proxy(req, res, url, prefix) {
       tooLarge()
       return
     }
-    body = read.body
+    body = read.body.toString('utf8')
   }
+
+  const decision = checkProxyRequest(
+    { method: req.method, path: upstreamPath, search: url.search, contentType: req.headers['content-type'], body },
+    ALLOWED_TX_TYPES,
+  )
+  if (!decision.ok) {
+    sendJson(res, decision.status, decision.message)
+    return
+  }
+  const target = `${PROXIES[prefix]}${upstreamPath}${decision.search}`
+  const headers = { accept: 'application/json' }
+  if (decision.contentType) headers['content-type'] = decision.contentType
+  if (decision.forwardAuth && req.headers.authorization) headers.authorization = req.headers.authorization
 
   const controller = new AbortController()
   // Covers the whole exchange, body included.
@@ -300,7 +314,7 @@ async function proxy(req, res, url, prefix) {
     const upstream = await fetch(target, {
       method: req.method,
       headers,
-      body,
+      body: decision.body,
       signal: controller.signal,
       redirect: 'manual',
     })
@@ -359,5 +373,5 @@ server.headersTimeout = 15_000
 
 server.listen(PORT, () => {
   const routes = Object.entries(PROXIES).map(([prefix, host]) => `${prefix} → ${host}`).join(', ')
-  console.log(`lighter-exit listening on :${PORT} (${routes})`)
+  console.log(`lighter-exit listening on :${PORT} (${routes}); relays transaction types ${[...ALLOWED_TX_TYPES].sort((a, b) => a - b).join(', ')}`)
 })

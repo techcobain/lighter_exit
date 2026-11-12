@@ -78,9 +78,18 @@ extra signature).
   `X-Frame-Options: DENY`, `nosniff` and `Referrer-Policy: no-referrer`. The
   build writes the allowed origins to `dist/csp.json`; `CSP_CONNECT_SRC` adds
   more at runtime.
-- **Proxy.** `/lighter-api` only forwards GET/POST under `/api/v1/` to one fixed
-  host. It is rate limited per client address, caps POST bodies and concurrent
-  upstream requests, and streams responses instead of buffering them.
+- **Proxy.** `/lighter-api` and `/lighter-api-rh` each forward to one fixed host,
+  and only what `server/policy.mjs` lists: the nine reads the page makes, and
+  `sendTx` for the transaction types the page sends through the API (8, 11, 12,
+  13, 19, 36). Orders (create 14, cancel-all 16), batches and every other
+  endpoint are refused before they reach Lighter, so the server cannot be used
+  to relay trading. A transaction is forwarded as a body rebuilt from its two
+  checked fields, with no query string. `PROXY_ALLOWED_TX_TYPES` replaces the
+  list (a staging deploy that tests "API first" adds 14 and 16); a malformed
+  value stops the server at startup. The proxy is also rate limited per client
+  address, caps POST bodies and concurrent upstream requests, and streams
+  responses instead of buffering them. The Vite dev server's proxy does not
+  apply these rules.
 - **Signer binary.** `scripts/build-wasm.sh` is reproducible (pinned lighter-go
   commit and Go version, `-trimpath`), and `scripts/signer.sha256` records the
   result. `npm run build` refuses to build when the files in `public/` differ
