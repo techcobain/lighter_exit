@@ -10,6 +10,16 @@ import { mainnet, robinhood } from 'viem/chains'
 const env = import.meta.env
 const read = (name: string): string | undefined => (env[name] as string | undefined)?.trim() || undefined
 
+/**
+ * Lighter's own API address for a deployment, which the browser calls itself
+ * when the server route is rate limited. 'off' disables that; a build that
+ * points the server at another Lighter API must set this to match.
+ */
+const directApi = (name: string, fallback: string): string | null => {
+  const value = read(name) ?? fallback
+  return value.toLowerCase() === 'off' ? null : value.replace(/\/$/, '')
+}
+
 export type EnvironmentId = 'mainnet' | 'rh'
 
 /** Where the L1 Priority Transactions (createOrder, cancelAllOrders, withdraw, changePubKey, burnShares) are sent. */
@@ -36,8 +46,10 @@ export interface LighterEnvironment {
   name: string
   /** One-line label that tells the two apart at a glance. */
   tag: string
-  /** Base URL for the REST API, without the /api/v1 suffix. */
+  /** Base URL for the REST API, without the /api/v1 suffix. Normally this site's proxy. */
   apiBase: string
+  /** Lighter's own API, called from the browser when the proxy is rate limited; null when that is switched off. */
+  directApiBase: string | null
   /** Lighter L2 chain id used when hashing L2 transactions. */
   lighterChainId: number
   /** The L1 the Lighter contract lives on. */
@@ -63,6 +75,7 @@ const MAINNET: LighterEnvironment = {
   name: 'Lighter',
   tag: 'Lighter · Ethereum',
   apiBase: (read('VITE_LIGHTER_API_BASE') ?? '/lighter-api').replace(/\/$/, ''),
+  directApiBase: directApi('VITE_LIGHTER_DIRECT_API_BASE', 'https://mainnet.zklighter.elliot.ai'),
   lighterChainId: Number(read('VITE_LIGHTER_CHAIN_ID') ?? 304),
   chain: mainnet,
   l1Name: 'Ethereum',
@@ -94,6 +107,7 @@ const ROBINHOOD: LighterEnvironment = {
   name: 'Lighter RH',
   tag: 'Lighter · Robinhood Chain',
   apiBase: (read('VITE_LIGHTER_RH_API_BASE') ?? '/lighter-api-rh').replace(/\/$/, ''),
+  directApiBase: directApi('VITE_LIGHTER_RH_DIRECT_API_BASE', 'https://api.rh.lighter.xyz'),
   lighterChainId: 466324,
   chain: robinhood,
   l1Name: 'Robinhood Chain',

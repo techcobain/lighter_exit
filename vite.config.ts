@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react-swc'
 import { mainnet, robinhood } from 'viem/chains'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 
+import { DEFAULT_UPSTREAMS } from './server/policy.mjs'
+
 // In development the Lighter APIs are reached through the same prefixes the
 // production server proxies, so the client code is identical.
 const proxies = {
@@ -45,6 +47,17 @@ function cspManifest(env: Record<string, string>): Plugin {
       // Only when the browser calls a Lighter API directly instead of through this server's proxy.
       for (const base of [env.VITE_LIGHTER_API_BASE, env.VITE_LIGHTER_RH_API_BASE]) {
         const api = originOf(base?.trim())
+        if (api) connectSrc.add(api)
+      }
+
+      // Lighter's own APIs, which the browser calls itself when this server's route is rate limited
+      // (src/lib/apiFallback.ts). Same defaults and 'off' switch as src/lib/environments.ts.
+      for (const [name, fallback] of [
+        ['VITE_LIGHTER_DIRECT_API_BASE', DEFAULT_UPSTREAMS['/lighter-api']],
+        ['VITE_LIGHTER_RH_DIRECT_API_BASE', DEFAULT_UPSTREAMS['/lighter-api-rh']],
+      ] as const) {
+        const value = env[name]?.trim() || fallback
+        const api = value.toLowerCase() === 'off' ? null : originOf(value)
         if (api) connectSrc.add(api)
       }
 

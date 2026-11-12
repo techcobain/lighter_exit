@@ -1,3 +1,4 @@
+export const DEFAULT_UPSTREAMS: { '/lighter-api': string; '/lighter-api-rh': string }
 export const ALLOWED_READS: Map<string, { auth: boolean }>
 export const SEND_TX_PATH: string
 export const DEFAULT_ALLOWED_TX_TYPES: number[]

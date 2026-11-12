@@ -34,6 +34,16 @@ being unreachable) that action is sent to the contract as well. The user can
 also choose contract-only mode. The rule is `DEFAULT_CONTRACT_SCOPE` in
 `src/lib/config.ts`, applied by `src/lib/route.ts`.
 
+API requests go through this site's server (`/lighter-api`,
+`/lighter-api-rh`), so Lighter sees the server's address rather than the
+user's. Every user shares that address, and Lighter rate limits it as one
+caller. When the server route answers with a rate limit (429, or Lighter's 405
+challenge page), the browser sends that request straight to Lighter instead and
+keeps doing so until the limit should have lifted (`src/lib/apiFallback.ts`).
+If the browser cannot reach Lighter itself, the user is told to wait; a rate
+limit is never treated as Lighter refusing the account, so it never sends an
+action to the contract.
+
 ## How it works
 
 | Step | API route | Contract route |
@@ -91,7 +101,8 @@ extra signature).
   that into a plain 429 and leaves that API alone for
   `PROXY_UPSTREAM_COOLDOWN_SEC` (20) so the limit can lift. All users share the
   server's address towards Lighter, so one heavy client can cause this for
-  everyone. The proxy is also rate limited per client
+  everyone; meanwhile browsers call Lighter directly, which the
+  Content-Security-Policy allows for Lighter's two API origins only. The proxy is also rate limited per client
   address, caps POST bodies and concurrent upstream requests, and streams
   responses instead of buffering them. The Vite dev server's proxy does not
   apply these rules.
@@ -245,6 +256,12 @@ key's seed, so:
 
 ### Other places that are easy to miss
 
+- Which way an API request travels is `src/lib/apiFallback.ts`: the server,
+  or straight to Lighter while the server is rate limited. Keep its one rule:
+  a rate limit, on either route, is never reported as Lighter refusing the
+  account, because a refusal sends the action to the contract and costs gas.
+  The direct addresses in `src/lib/environments.ts` must match the ones the
+  server forwards to (`server/policy.mjs`); a test checks the defaults.
 - Wallets: `src/lib/wallets.ts` holds the always-listed wallets and the block
   list; the FAQ entry "Which wallets work?" repeats it in words.
 - A second Lighter deployment setting goes in `src/lib/environments.ts`, never

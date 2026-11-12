@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 
 import {
   ALLOWED_READS,
+  DEFAULT_UPSTREAMS,
   SEND_TX_PATH,
   UPSTREAM_RATE_LIMIT_MESSAGE,
   checkProxyRequest,
@@ -28,8 +29,8 @@ const PORT = Number(process.env.PORT ?? 8787)
 const upstream = (name, fallback) => (process.env[name] ?? fallback).replace(/\/$/, '')
 // Path prefix → the one host it forwards to.
 const PROXIES = {
-  '/lighter-api': upstream('LIGHTER_API_URL', 'https://mainnet.zklighter.elliot.ai'),
-  '/lighter-api-rh': upstream('LIGHTER_RH_API_URL', 'https://api.rh.lighter.xyz'),
+  '/lighter-api': upstream('LIGHTER_API_URL', DEFAULT_UPSTREAMS['/lighter-api']),
+  '/lighter-api-rh': upstream('LIGHTER_RH_API_URL', DEFAULT_UPSTREAMS['/lighter-api-rh']),
 }
 const PROXY_TIMEOUT_MS = 30_000
 // Throws on a malformed list, so a typo stops the server instead of silently changing what is relayed.

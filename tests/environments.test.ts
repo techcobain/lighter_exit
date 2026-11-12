@@ -2,6 +2,7 @@ import { toFunctionSelector } from 'viem'
 import { describe, expect, it } from 'vitest'
 
 import { legacyPriorityAbi, resolveL1Call } from '../src/lib/contract'
+import { DEFAULT_UPSTREAMS } from '../server/policy.mjs'
 import { ENVIRONMENTS, ENVIRONMENT_LIST, chooseEnvironment, offersSwitch } from '../src/lib/environments'
 
 describe('environments', () => {
@@ -15,6 +16,11 @@ describe('environments', () => {
     expect(rh.contract).toBe('0x94bAB9693Ba2f6358507eFfcbd372b0660AFfF9d')
     expect(mainnet.contract).not.toBe(rh.contract)
     expect(mainnet.apiBase).not.toBe(rh.apiBase)
+  })
+
+  it('calls the same Lighter API directly as the server forwards to', () => {
+    expect(ENVIRONMENTS.mainnet.directApiBase).toBe(DEFAULT_UPSTREAMS['/lighter-api'])
+    expect(ENVIRONMENTS.rh.directApiBase).toBe(DEFAULT_UPSTREAMS['/lighter-api-rh'])
   })
 
   it('sends Lighter RH priority transactions to ZkLighter with the pre-split encoding', () => {

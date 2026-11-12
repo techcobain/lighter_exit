@@ -1,6 +1,7 @@
 import { isPreview, isSamplePreview, previewAccountList, previewAssets, previewMarkets, previewNames, previewPools, previewState, PREVIEW_PUBLIC_KEY } from '../dev/preview'
+import { newApiRouteState, sendWithDirectFallback, type ApiRouteState } from './apiFallback'
 import { API_KEY_INDEX, RESTRICTION_ERROR_CODES } from './config'
-import { activeEnvironment, type LighterEnvironment } from './environments'
+import { activeEnvironment, type EnvironmentId, type LighterEnvironment } from './environments'
 
 import type {
   ApiKeyInfo,
@@ -17,6 +18,8 @@ export class LighterApiError extends Error {
     message: string,
     public readonly code: number,
     public readonly httpStatus: number,
+    /** Seconds the server asked to wait, when it said. */
+    public readonly retryAfterSec?: number,
   ) {
     super(message)
     this.name = 'LighterApiError'
@@ -27,19 +30,21 @@ const RATE_LIMITED_MESSAGE = 'Lighter is rate limiting requests right now. Wait 
 
 const NOT_FOUND_CODES = new Set([21100, 21109, 21500])
 
-/** Calls the active deployment's API unless another one is named. */
-async function request<T>(path: string, init?: RequestInit, env: LighterEnvironment = activeEnvironment()): Promise<T> {
+/** One request to a Lighter API at `base`: this site's proxy, or Lighter itself. */
+async function send<T>(base: string, path: string, init?: RequestInit): Promise<T> {
   let res: Response
   try {
-    res = await fetch(`${env.apiBase}/api/v1${path}`, {
+    res = await fetch(`${base}/api/v1${path}`, {
       ...init,
       headers: { accept: 'application/json', ...(init?.headers ?? {}) },
     })
   } catch (err) {
     throw new LighterApiError(`Lighter API unreachable: ${err instanceof Error ? err.message : String(err)}`, 0, 0)
   }
+  const retryAfter = Number(res.headers.get('retry-after'))
+  const retryAfterSec = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined
   // Lighter's edge answers 405 with a browser challenge page when it is rate limiting the caller.
-  if (res.status === 405) throw new LighterApiError(RATE_LIMITED_MESSAGE, 429, 429)
+  if (res.status === 405) throw new LighterApiError(RATE_LIMITED_MESSAGE, 429, 429, retryAfterSec)
   const text = await res.text()
   let body: unknown = null
   try {
@@ -51,9 +56,29 @@ async function request<T>(path: string, init?: RequestInit, env: LighterEnvironm
   const code = typeof obj.code === 'number' ? obj.code : res.ok ? 200 : res.status
   if (!res.ok || (code !== 200 && code !== 0)) {
     const message = obj.message || (text ? text.slice(0, 200) : `HTTP ${res.status}`)
-    throw new LighterApiError(message, code, res.status)
+    throw new LighterApiError(message, code, res.status, retryAfterSec)
   }
   return body as T
+}
+
+// Per deployment: whether its server route is rate limited right now, and whether the browser can reach Lighter itself.
+const routeStates = new Map<EnvironmentId, ApiRouteState>()
+
+/**
+ * Calls the active deployment's API unless another one is named. Goes through
+ * this site's server; when that is rate limited, straight to Lighter from the
+ * browser (see apiFallback.ts).
+ */
+async function request<T>(path: string, init?: RequestInit, env: LighterEnvironment = activeEnvironment()): Promise<T> {
+  let state = routeStates.get(env.id)
+  if (!state) routeStates.set(env.id, (state = newApiRouteState()))
+  const direct = env.directApiBase && env.directApiBase !== env.apiBase ? env.directApiBase : null
+  return sendWithDirectFallback({
+    viaServer: () => send<T>(env.apiBase, path, init),
+    direct: direct ? () => send<T>(direct, path, init) : null,
+    state,
+    failureOf: (err) => (err instanceof LighterApiError ? { httpStatus: err.httpStatus, retryAfterSec: err.retryAfterSec } : null),
+  })
 }
 
 export function isNotFound(err: unknown): boolean {

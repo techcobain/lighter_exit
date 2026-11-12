@@ -5,6 +5,12 @@
 //
 // Pure functions, no I/O, so the rules can be tested (tests/proxyPolicy.test.ts).
 
+/** Proxy prefix → the Lighter API it forwards to unless LIGHTER_API_URL / LIGHTER_RH_API_URL say otherwise. */
+export const DEFAULT_UPSTREAMS = {
+  '/lighter-api': 'https://mainnet.zklighter.elliot.ai',
+  '/lighter-api-rh': 'https://api.rh.lighter.xyz',
+}
+
 /** Reads the page makes, by path under /api/v1. `auth` marks the ones that carry the user's auth token. */
 export const ALLOWED_READS = new Map([
   ['/api/v1/account', { auth: false }],
