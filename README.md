@@ -149,11 +149,82 @@ repo; Railway builds the image, sets `PORT`, and probes `/healthz`. Pass any
 `VITE_*` values as build args or service variables. Pick a region that is not
 restricted by Lighter, since the proxy's egress IP is what the API sees.
 
-Branches: `prod` is the customer-facing site at `exit.lighter.xyz` and should
-be built with no `VITE_FORCE_L1_OPTION`. The wallet prompt for the signing key
-names the host the page is served from, so a key unlocked on one domain is not
-the key of another: someone who used a previous address unlocks again on the
-new one, which replaces the key in the same slot.
+## Making changes
+
+Read this before changing how the page behaves. Several rules live in more
+than one place and have to move together.
+
+### Branches and releases
+
+- `main` deploys to Railway automatically: the `production` environment on its
+  Railway domain, and `staging`, which also shows the routing test switch.
+- `prod` is the customer-facing site at `exit.lighter.xyz`. Build it with no
+  `VITE_FORCE_L1_OPTION` and no `PROXY_ALLOWED_TX_TYPES`.
+- Keep the two on the same commit. Work on `main`, run `npm run check`, try it
+  on staging with a real wallet, then fast-forward `prod`
+  (`git push origin main:prod`). Anything that touches a contract call or the
+  signing key gets a real-wallet run on staging first; unit tests and the
+  `?preview` walkthrough do not exercise a wallet.
+
+### The routing rule (API or contract)
+
+Trading (cancelling orders, closing positions) always goes to the contract
+from the user's wallet. Everything else tries the API first. To change which
+side an action is on, change all of these in the same commit:
+
+1. `src/lib/config.ts`: `DEFAULT_CONTRACT_SCOPE`, and the `trading: true` flag
+   on the request in the step component (`src/components/steps/`).
+2. `server/policy.mjs`: `DEFAULT_ALLOWED_TX_TYPES`. The proxy refuses any
+   transaction type that is not listed, so the page and the server must agree.
+   `tests/proxyPolicy.test.ts` fails when they drift.
+3. The words. They are written for the current rule: `Hero.tsx`, step 0 in
+   `SigningKeyCard.tsx`, the cancel and close step descriptions, `Faq.tsx`
+   ("Who is this for", "In what order", "Unlock API signing", "When does it
+   use the contract", "How long", "How are positions closed"), the switch
+   descriptions in `ForceL1Bar.tsx`, and the routing paragraph and table above.
+4. The signing-key message, if it describes what the key is used for (below).
+
+Adding an action: add its type to `TX_TYPE`, give the request a contract route
+if one exists, mark it `trading: true` if it places or cancels orders, and add
+the type to `server/policy.mjs` only if it is sent through the API. Adding an
+API read: add its path to `ALLOWED_READS` in `server/policy.mjs`, or the proxy
+answers 404.
+
+### The signing-key message
+
+`keyDerivationMessage` in `src/lib/signer.ts`. The signature over it is the
+key's seed, so:
+
+- Changing a single character gives every user a different key. They unlock
+  again and the new key replaces the old one in the same slot; nothing is lost,
+  but do it on purpose and say so in the commit.
+- It names the host the page is opened on. The same build on another domain
+  asks for a different signature and derives a different key, so serve
+  customers from one address only.
+- It must stay a valid one-line EIP-4361 statement and must stay true: it says
+  what the page uses the key for. `tests/keyMessage.test.ts` pins both.
+
+### Things that stay off in production
+
+- The `?preview` walkthrough is for `npm run dev` only. Do not add a way to
+  turn it on in a production build.
+- `VITE_FORCE_L1_OPTION` (routing test switch) and `PROXY_ALLOWED_TX_TYPES`
+  (lets the proxy relay orders for that test) are for staging only.
+- `VITE_*` values are public. No secrets, no RPC URL with a key in it.
+
+### Other places that are easy to miss
+
+- Wallets: `src/lib/wallets.ts` holds the always-listed wallets and the block
+  list; the FAQ entry "Which wallets work?" repeats it in words.
+- A second Lighter deployment setting goes in `src/lib/environments.ts`, never
+  in a component. Copy that names a chain reads it from there.
+- A new external origin the browser talks to must come from a `VITE_*` value
+  so the build adds it to the Content-Security-Policy (`vite.config.ts`).
+- Rebuilding the signer: `scripts/build-wasm.sh`, then update
+  `scripts/signer.sha256`. The build refuses a wasm that does not match.
+- Colours, spacing and type come from the shared classes in
+  `src/lib/recipes.ts` and the tokens in `src/css/`; reuse them instead of
+  adding one-off values.
 
 ## Verification notes
 
