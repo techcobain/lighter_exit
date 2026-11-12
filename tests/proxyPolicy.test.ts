@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { ALLOWED_READS, DEFAULT_ALLOWED_TX_TYPES, checkProxyRequest, clientAddress, parseAllowedTxTypes } from '../server/policy.mjs'
+import {
+  ALLOWED_READS,
+  DEFAULT_ALLOWED_TX_TYPES,
+  checkProxyRequest,
+  clientAddress,
+  isUpstreamRateLimit,
+  parseAllowedTxTypes,
+} from '../server/policy.mjs'
 import { TX_TYPE } from '../src/lib/config'
 
 const allowed = parseAllowedTxTypes(undefined)
@@ -104,5 +111,12 @@ describe('clientAddress', () => {
 
   it('groups IPv6 clients by /64', () => {
     expect(clientAddress('2001:db8:1:2:3:4:5:6', undefined)).toBe('2001:db8:1:2')
+  })
+})
+
+describe('isUpstreamRateLimit', () => {
+  it('reads a 405 from Lighter as a rate limit and nothing else', () => {
+    expect(isUpstreamRateLimit(405)).toBe(true)
+    for (const status of [200, 400, 403, 404, 429, 451, 500, 502]) expect(isUpstreamRateLimit(status)).toBe(false)
   })
 })

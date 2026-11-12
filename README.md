@@ -86,7 +86,12 @@ extra signature).
   to relay trading. A transaction is forwarded as a body rebuilt from its two
   checked fields, with no query string. `PROXY_ALLOWED_TX_TYPES` replaces the
   list (a staging deploy that tests "API first" adds 14 and 16); a malformed
-  value stops the server at startup. The proxy is also rate limited per client
+  value stops the server at startup. When Lighter rate limits the server's
+  own address it answers 405 with a browser challenge page; the proxy turns
+  that into a plain 429 and leaves that API alone for
+  `PROXY_UPSTREAM_COOLDOWN_SEC` (20) so the limit can lift. All users share the
+  server's address towards Lighter, so one heavy client can cause this for
+  everyone. The proxy is also rate limited per client
   address, caps POST bodies and concurrent upstream requests, and streams
   responses instead of buffering them. The Vite dev server's proxy does not
   apply these rules.

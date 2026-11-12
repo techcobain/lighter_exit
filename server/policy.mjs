@@ -102,3 +102,12 @@ export function clientAddress(headerValue, remoteAddress) {
   if (ip.includes(':')) ip = ip.split(':').slice(0, 4).join(':')
   return ip
 }
+
+/**
+ * Lighter's edge answers 405 with a browser challenge page (not JSON) when it
+ * is rate limiting the address a request came from, which here is this
+ * server's. The proxy only sends GET to reads and POST to sendTx, so a 405 is
+ * never a genuine "method not allowed": it is treated as a rate limit.
+ */
+export const isUpstreamRateLimit = (status) => status === 405
+export const UPSTREAM_RATE_LIMIT_MESSAGE = 'Lighter is rate limiting requests right now. Wait a minute and try again.'

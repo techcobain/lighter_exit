@@ -3,6 +3,8 @@ export const SEND_TX_PATH: string
 export const DEFAULT_ALLOWED_TX_TYPES: number[]
 export function parseAllowedTxTypes(value: string | undefined): Set<number>
 export function clientAddress(headerValue: string | string[] | undefined, remoteAddress: string | undefined): string
+export function isUpstreamRateLimit(status: number): boolean
+export const UPSTREAM_RATE_LIMIT_MESSAGE: string
 export type ProxyDecision =
   | { ok: true; search: string; forwardAuth: boolean; body?: string; contentType?: string }
   | { ok: false; status: number; message: string }

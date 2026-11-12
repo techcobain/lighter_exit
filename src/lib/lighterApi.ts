@@ -23,6 +23,8 @@ export class LighterApiError extends Error {
   }
 }
 
+const RATE_LIMITED_MESSAGE = 'Lighter is rate limiting requests right now. Wait a minute and try again.'
+
 const NOT_FOUND_CODES = new Set([21100, 21109, 21500])
 
 /** Calls the active deployment's API unless another one is named. */
@@ -36,6 +38,8 @@ async function request<T>(path: string, init?: RequestInit, env: LighterEnvironm
   } catch (err) {
     throw new LighterApiError(`Lighter API unreachable: ${err instanceof Error ? err.message : String(err)}`, 0, 0)
   }
+  // Lighter's edge answers 405 with a browser challenge page when it is rate limiting the caller.
+  if (res.status === 405) throw new LighterApiError(RATE_LIMITED_MESSAGE, 429, 429)
   const text = await res.text()
   let body: unknown = null
   try {

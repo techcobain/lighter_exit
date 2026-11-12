@@ -12,7 +12,15 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
 
-import { ALLOWED_READS, SEND_TX_PATH, checkProxyRequest, clientAddress, parseAllowedTxTypes } from './policy.mjs'
+import {
+  ALLOWED_READS,
+  SEND_TX_PATH,
+  UPSTREAM_RATE_LIMIT_MESSAGE,
+  checkProxyRequest,
+  clientAddress,
+  isUpstreamRateLimit,
+  parseAllowedTxTypes,
+} from './policy.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DIST = path.resolve(__dirname, '..', 'dist')
@@ -38,6 +46,9 @@ const MAX_BODY_BYTES = envNumber('PROXY_MAX_BODY_BYTES', 256 * 1024)
 const MAX_INFLIGHT = envNumber('PROXY_MAX_INFLIGHT', 200)
 const RATE_BURST = envNumber('PROXY_RATE_BURST', 120)
 const RATE_PER_SEC = envNumber('PROXY_RATE_PER_MIN', 240) / 60
+// After Lighter rate limits this server, stop forwarding to that API for this long:
+// requests sent while it is limiting only keep the limit in place.
+const UPSTREAM_COOLDOWN_MS = envNumber('PROXY_UPSTREAM_COOLDOWN_SEC', 20) * 1000
 // Header the platform's edge sets to the real client address (Railway: X-Real-IP;
 // behind an AWS load balancer: X-Forwarded-For, whose last entry is used).
 // Set to an empty string when nothing trusted sits in front of this server, so
@@ -247,6 +258,13 @@ function readBody(req, limit) {
 }
 
 let inflight = 0
+// Proxy prefix → time until which that upstream is left alone after rate limiting this server.
+const coolingUntil = new Map()
+
+function sendUpstreamLimited(res, prefix) {
+  const seconds = Math.max(1, Math.ceil(((coolingUntil.get(prefix) ?? 0) - Date.now()) / 1000))
+  sendJson(res, 429, UPSTREAM_RATE_LIMIT_MESSAGE, { 'retry-after': String(seconds) })
+}
 
 async function proxy(req, res, url, prefix) {
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -294,6 +312,10 @@ async function proxy(req, res, url, prefix) {
     sendJson(res, decision.status, decision.message)
     return
   }
+  if (Date.now() < (coolingUntil.get(prefix) ?? 0)) {
+    sendUpstreamLimited(res, prefix)
+    return
+  }
   const target = `${PROXIES[prefix]}${upstreamPath}${decision.search}`
   const headers = { accept: 'application/json' }
   if (decision.contentType) headers['content-type'] = decision.contentType
@@ -313,6 +335,14 @@ async function proxy(req, res, url, prefix) {
       signal: controller.signal,
       redirect: 'manual',
     })
+    if (isUpstreamRateLimit(upstream.status)) {
+      // A challenge page meant for a browser: answer with a plain rate-limit error instead of passing it on.
+      if (Date.now() >= (coolingUntil.get(prefix) ?? 0)) console.warn(`${prefix}: upstream is rate limiting this server, pausing ${UPSTREAM_COOLDOWN_MS / 1000}s`)
+      coolingUntil.set(prefix, Date.now() + UPSTREAM_COOLDOWN_MS)
+      await upstream.body?.cancel().catch(() => {})
+      sendUpstreamLimited(res, prefix)
+      return
+    }
     res.writeHead(upstream.status, {
       'content-type': upstream.headers.get('content-type') ?? 'application/json',
       'cache-control': 'no-store',
