@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { chooseRoute, forcesL1, type RouteInput } from '../src/lib/route'
+import { DEFAULT_CONTRACT_SCOPE } from '../src/lib/config'
+import { alwaysContract, chooseRoute, type RouteInput } from '../src/lib/route'
 
 const base: RouteInput = { mode: 'api', forceL1: false, hasL2: true, hasL1: true, keyReady: true }
 
@@ -14,12 +15,12 @@ describe('chooseRoute', () => {
     expect(chooseRoute({ ...base, mode: 'l1' })).toBe('l1')
   })
 
-  it('forces the contract for every action that has a contract route', () => {
+  it('uses the contract for an action that always goes there', () => {
     expect(chooseRoute({ ...base, forceL1: true })).toBe('l1')
     expect(chooseRoute({ ...base, forceL1: true, keyReady: false })).toBe('l1')
   })
 
-  it('keeps API-only actions on the API even when contract calls are forced', () => {
+  it('keeps API-only actions on the API even when the scope sends everything to the contract', () => {
     expect(chooseRoute({ ...base, forceL1: true, hasL1: false })).toBe('api')
   })
 
@@ -29,19 +30,26 @@ describe('chooseRoute', () => {
   })
 })
 
-describe('forcesL1', () => {
-  it('forces nothing when the switch is off', () => {
-    expect(forcesL1('off', true)).toBe(false)
-    expect(forcesL1('off', false)).toBe(false)
+describe('alwaysContract', () => {
+  it('sends trading to the contract by default and leaves the rest on the API', () => {
+    expect(DEFAULT_CONTRACT_SCOPE).toBe('trading')
+    expect(alwaysContract(DEFAULT_CONTRACT_SCOPE, true)).toBe(true)
+    expect(alwaysContract(DEFAULT_CONTRACT_SCOPE, false)).toBe(false)
   })
 
-  it('forces only trading actions in the trading scope', () => {
-    expect(forcesL1('trading', true)).toBe(true)
-    expect(forcesL1('trading', false)).toBe(false)
+  it('sends nothing to the contract up front in the API-first scope', () => {
+    expect(alwaysContract('none', true)).toBe(false)
+    expect(alwaysContract('none', false)).toBe(false)
   })
 
-  it('forces every action in the all scope', () => {
-    expect(forcesL1('all', true)).toBe(true)
-    expect(forcesL1('all', false)).toBe(true)
+  it('sends every action to the contract in the all scope', () => {
+    expect(alwaysContract('all', true)).toBe(true)
+    expect(alwaysContract('all', false)).toBe(true)
+  })
+
+  it('routes a close to the contract even with a registered key, and a withdrawal to the API', () => {
+    const scope = DEFAULT_CONTRACT_SCOPE
+    expect(chooseRoute({ ...base, forceL1: alwaysContract(scope, true) })).toBe('l1')
+    expect(chooseRoute({ ...base, forceL1: alwaysContract(scope, false) })).toBe('api')
   })
 })

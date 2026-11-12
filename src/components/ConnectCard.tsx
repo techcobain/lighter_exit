@@ -92,7 +92,7 @@ export function ConnectCard({ onPreview }: { onPreview: (address: string) => voi
         }}
       >
         <label htmlFor="preview-address" className={LABEL_CLASSNAME}>
-          Read-only preview
+          Read-only lookup
         </label>
         <div className="flex gap-2 max-mobile:flex-col">
           <input

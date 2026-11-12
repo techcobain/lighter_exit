@@ -1,13 +1,12 @@
 // Preview harness: open the page with ?preview to walk through every step on
 // fixture data without a wallet or the Lighter API. Actions are simulated and
-// mutate the fixtures so the page evolves like the real thing. Enabled in
-// dev builds always, in production only with VITE_ENABLE_PREVIEW=1.
+// mutate the fixtures so the page evolves like the real thing. Development
+// builds only: no production build can show it, whatever its configuration.
 
 import type { AccountPoolInfo, AssetDetails, DetailedAccount, MarketDetails, PoolInfo } from '../lib/types'
 
 const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
-export const isPreview =
-  !!params?.has('preview') && (import.meta.env.DEV || import.meta.env.VITE_ENABLE_PREVIEW === '1')
+export const isPreview = import.meta.env.DEV && !!params?.has('preview')
 
 export type PreviewSource = 'sample' | 'live'
 

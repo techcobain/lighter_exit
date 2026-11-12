@@ -24,20 +24,23 @@ address; after that only the user changes it. Action history and unlocked keys
 are dropped on a switch, and a signing key unlocked on one deployment cannot
 sign for the other (`src/lib/environments.ts`, `src/lib/signer.ts`).
 
-Every action is sent to the Lighter API first (an L2 transaction signed in the
-browser with a key derived from the user's wallet). When the API refuses the
-account (blacklist code 52001, permission code 23100, a 403/451 edge block, or
-the API being unreachable) the same action is sent to the Lighter contract
-instead (on Ethereum for Lighter, on Robinhood Chain for Lighter RH). The user
-can also force contract-only mode.
+Trading is never sent through the API: cancelling orders and closing positions
+are always transactions the user's wallet sends to the Lighter contract (on
+Ethereum for Lighter, on Robinhood Chain for Lighter RH). Every other action is
+sent to the Lighter API first (an L2 transaction signed in the browser with a
+key derived from the user's wallet). When the API refuses the account
+(blacklist code 52001, permission code 23100, a 403/451 edge block, or the API
+being unreachable) that action is sent to the contract as well. The user can
+also choose contract-only mode. The rule is `DEFAULT_CONTRACT_SCOPE` in
+`src/lib/config.ts`, applied by `src/lib/route.ts`.
 
 ## How it works
 
-| Step | API route (default) | Contract fallback |
+| Step | API route | Contract route |
 | --- | --- | --- |
 | 0 · Unlock signing | wallet `personal_sign` → seed → Lighter key → `ChangePubKey` (tx 8) | `changePubKey(uint48,uint8,bytes)` |
-| 1 · Cancel orders | `CancelAllOrders` (tx 16) | `cancelAllOrders(uint48)` |
-| 2 · Close perps | reduce-only IOC market order (tx 14) | `createOrder(uint48,uint16,uint48,uint32,uint8,uint8)` |
+| 1 · Cancel orders | not used (`CancelAllOrders`, tx 16, testing only) | **always:** `cancelAllOrders(uint48)` |
+| 2 · Close perps | not used (reduce-only IOC market order, tx 14, testing only) | **always:** `createOrder(uint48,uint16,uint48,uint32,uint8,uint8)` |
 | 3 · Exit pools | `BurnShares` (tx 19) | `burnShares(uint48,uint48,uint64)` |
 | 4 · Unstake | `UnstakeAssets` (tx 36) | none (L2 only) |
 | 5 · Withdraw | `Withdraw` (tx 13), spot route 1 and perps route 0 | `withdraw(uint48,uint16,uint8,uint64)` |
@@ -110,7 +113,7 @@ npm run dev        # http://localhost:5173, proxies /lighter-api to mainnet
 npm run check      # typecheck + unit tests + production build
 ```
 
-Use the read-only preview (paste an address) to inspect any account without a
+Use the read-only lookup (paste an address) to inspect any account without a
 wallet.
 
 ## Configure
@@ -119,13 +122,16 @@ See `.env.example`. Build-time `VITE_*` variables are baked into the bundle, so
 never put a secret in one (an RPC URL with an API key becomes public); `PORT`,
 `LIGHTER_API_URL`, `LIGHTER_RH_API_URL` and the proxy limits are read by the server at runtime.
 
-For testing the contract route (on a staging deploy, not production), build
-with `VITE_FORCE_L1_OPTION=1`. The page then shows a "force contract calls"
-switch with two settings. "Trading only" sends closing positions and cancelling
-orders to the contract and leaves everything else on the API. "Everything"
-also sends key registration and every other step that has a contract route, as
-if the API had refused the account. Unstaking and freezing a pool have no
-contract route and keep using the API.
+For testing the routes (on a staging deploy, not production), build with
+`VITE_FORCE_L1_OPTION=1`. The page then shows a "contract routing" switch.
+"Trading on contract" is the default and what production does. "API first"
+also sends cancelling orders and closing positions to the API. "All on
+contract" also sends key registration and every other step that has a contract
+route to the contract, as if the API had refused the account. Unstaking and
+freezing a pool have no contract route and keep using the API.
+
+The `?preview` walkthrough on sample data exists in development builds only
+(`npm run dev`); no production build can show it.
 
 ## Deploy on Railway
 
@@ -133,6 +139,12 @@ The repo ships a `Dockerfile` and `railway.json`. Create a service from the
 repo; Railway builds the image, sets `PORT`, and probes `/healthz`. Pass any
 `VITE_*` values as build args or service variables. Pick a region that is not
 restricted by Lighter, since the proxy's egress IP is what the API sees.
+
+Branches: `prod` is the customer-facing site at `exit.lighter.xyz` and should
+be built with no `VITE_FORCE_L1_OPTION`. The wallet prompt for the signing key
+names the host the page is served from, so a key unlocked on one domain is not
+the key of another: someone who used a previous address unlocks again on the
+new one, which replaces the key in the same slot.
 
 ## Verification notes
 

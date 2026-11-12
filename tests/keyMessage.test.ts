@@ -34,6 +34,16 @@ describe('keyDerivationMessage', () => {
     expect(lines[8]!.slice('Nonce: '.length)).toMatch(/^[A-Za-z0-9]{8,}$/)
   })
 
+  it('names the production site and says what the key is used for', () => {
+    const lines = keyDerivationMessage({ ...base, host: 'exit.lighter.xyz', origin: 'https://exit.lighter.xyz' }).split('\n')
+    expect(lines[0]).toBe('exit.lighter.xyz wants you to sign in with your Ethereum account:')
+    expect(lines[3]).toContain('exit and withdrawal requests')
+    // Orders are cancelled and positions closed through the contract, not with this key.
+    expect(lines[3]).not.toMatch(/close|order|trad/i)
+    expect(lines[3]!.endsWith('Only sign this on exit.lighter.xyz.')).toBe(true)
+    expect(lines[5]).toBe('URI: https://exit.lighter.xyz')
+  })
+
   it('is deterministic, since the signature over it seeds the key', () => {
     expect(keyDerivationMessage(base)).toBe(keyDerivationMessage({ ...base }))
   })

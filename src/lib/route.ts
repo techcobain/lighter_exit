@@ -3,7 +3,7 @@
 export interface RouteInput {
   /** 'l1' when the user opted out of registering a key (contract-only mode). */
   mode: 'api' | 'l1'
-  /** Testing switch: send to the contract whenever the action has a contract route. */
+  /** This action always goes to the contract when it has a contract route (see alwaysContract). */
   forceL1: boolean
   /** The action can be sent as an API-signed L2 transaction. */
   hasL2: boolean
@@ -13,11 +13,14 @@ export interface RouteInput {
   keyReady: boolean
 }
 
-/** Testing switch: which actions are sent to the contract even though the API would take them. */
-export type ForceL1Scope = 'off' | 'trading' | 'all'
+/**
+ * Which actions are always sent to the contract, even though the API would take them:
+ * none of them (API first for everything), the trading ones, or all of them.
+ */
+export type ContractScope = 'none' | 'trading' | 'all'
 
-/** Whether the testing switch claims this action. `trading` marks the ones that place or cancel orders. */
-export function forcesL1(scope: ForceL1Scope, trading: boolean): boolean {
+/** Whether the scope sends this action to the contract. `trading` marks the ones that place or cancel orders. */
+export function alwaysContract(scope: ContractScope, trading: boolean): boolean {
   return scope === 'all' || (scope === 'trading' && trading)
 }
 

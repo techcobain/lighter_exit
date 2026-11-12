@@ -1,8 +1,9 @@
-// Runs one exit action. The API route is always tried first (an L2
-// transaction signed with the account's derived key, free and instant); the
-// L1 contract route (Ethereum, or Robinhood Chain for Lighter RH) is used only
-// when the API refuses the account, when the user opted into contract-only
-// mode, or when the testing switch forces contract calls (see chooseRoute).
+// Runs one exit action. Trading actions (cancelling orders, closing
+// positions) always go to the L1 contract (Ethereum, or Robinhood Chain for
+// Lighter RH), sent by the user's wallet. Every other action tries the API
+// first (an L2 transaction signed with the account's derived key, free and
+// instant) and falls back to the contract when the API refuses the account or
+// the user opted into contract-only mode. See chooseRoute and alwaysContract.
 
 import { useCallback } from 'react'
 
@@ -12,11 +13,11 @@ import { isPreview, previewApply } from '../dev/preview'
 import { API_KEY_INDEX } from '../lib/config'
 import { describeError } from '../lib/format'
 import { fetchNextNonce, fetchTxByHash, isExecuted, isRestrictionError, l2ExecutionError, sendTx } from '../lib/lighterApi'
-import { chooseRoute, forcesL1 } from '../lib/route'
+import { alwaysContract, chooseRoute } from '../lib/route'
 
 import { useActions } from './useActions'
 import { useEnvironment } from './useEnvironment'
-import { useForceL1Scope } from './useForceL1'
+import { useContractScope } from './useContractScope'
 import { useL1Action, type L1ActionRequest } from './useL1Action'
 import { useSigningKeys } from './useSigningKeys'
 
@@ -27,7 +28,7 @@ export interface ExitActionRequest {
   label: string
   /** Account whose key signs the API transaction. */
   accountIndex: number
-  /** Places or cancels orders. The testing switch can send just these to the contract. */
+  /** Places or cancels orders. These go to the contract, never through the API, unless a tester changed the scope. */
   trading?: boolean
   l2?: { txType: number; sign: (nonce: number) => Promise<SignedTx> }
   /** Contract fallback; omit for actions that only exist on L2 (unstake, freeze). */
@@ -41,7 +42,7 @@ const L2_RESULT_TIMEOUT_MS = 45_000
 export function useExitAction() {
   const { update } = useActions()
   const { keys, mode } = useSigningKeys()
-  const forceScope = useForceL1Scope()
+  const scope = useContractScope()
   const { run: runL1 } = useL1Action()
   const queryClient = useQueryClient()
   const l1 = useEnvironment().l1Name
@@ -57,7 +58,7 @@ export function useExitAction() {
   const run = useCallback(
     async (req: ExitActionRequest): Promise<boolean> => {
       const { id, label } = req
-      const forceL1 = forcesL1(forceScope, !!req.trading)
+      const forceL1 = alwaysContract(scope, !!req.trading)
       if (isPreview) {
         const route = chooseRoute({ mode, forceL1, hasL2: !!req.l2, hasL1: !!req.l1, keyReady: true }) === 'api' ? 'api' : 'l1'
         const steps: [Parameters<typeof update>[1]['status'], string][] =
@@ -126,7 +127,7 @@ export function useExitAction() {
         return false
       }
     },
-    [forceScope, invalidate, keys, l1, mode, runL1, update],
+    [invalidate, keys, l1, mode, runL1, scope, update],
   )
 
   /** Runs requests one after another; stops at the first failure. */

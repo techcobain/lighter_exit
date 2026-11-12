@@ -1,5 +1,5 @@
 import { useEnvironment } from '../hooks/useEnvironment'
-import { useForceL1Scope } from '../hooks/useForceL1'
+import { useContractScope } from '../hooks/useContractScope'
 import { KEY_BUSY_STAGES, useSigningKeys } from '../hooks/useSigningKeys'
 import { useActions } from '../hooks/useActions'
 import cn from '../lib/cn'
@@ -10,8 +10,8 @@ import { ActionLine } from './ActionStatus'
 import { StepCard, type StepState } from './StepCard'
 
 /**
- * Step 0 for an account: derive and register the signing key that lets every
- * other step go through the API. Also hosts the contract-only switch.
+ * Step 0 for an account: derive and register the signing key that lets the
+ * steps that use the API go through it. Also hosts the contract-only switch.
  */
 export function SigningKeyCard({
   accountIndex,
@@ -29,7 +29,7 @@ export function SigningKeyCard({
   const { keys, mode, setMode, unlock, recheck } = useSigningKeys()
   const { actions } = useActions()
   const l1 = useEnvironment().l1Name
-  const forceScope = useForceL1Scope()
+  const scope = useContractScope()
   const state = keys[accountIndex] ?? { stage: 'idle' as const }
   const busy = KEY_BUSY_STAGES.has(state.stage)
   const registered = state.stage === 'registered'
@@ -42,10 +42,10 @@ export function SigningKeyCard({
       {registered ? (
         <p className="text-sm text-success">
           Key registered on account #{accountIndex}.{' '}
-          {forceScope === 'all'
-            ? 'Contract calls are forced: only unstaking and freezing a pool use the API.'
-            : forceScope === 'trading'
-              ? 'Closing positions and cancelling orders are forced to the contract. Everything else goes through the API and needs no gas.'
+          {scope === 'all'
+            ? 'Testing: every step with a contract route goes to the contract. Only unstaking and freezing a pool use the API.'
+            : scope === 'trading'
+              ? `Pool exits, unstaking, transfers and withdrawals go through the API and need no gas. Cancelling orders and closing positions are sent to the ${l1} contract.`
               : 'Actions go through the API and need no gas.'}
           <span className="ml-2 font-mono text-2xs text-meta">{state.key?.publicKey.slice(0, 16)}…</span>
         </p>
@@ -108,9 +108,12 @@ export function SigningKeyCard({
       description={
         <>
           Your wallet signs a message that derives a Lighter signing key for this account. The key is registered at
-          API slot {API_KEY_INDEX} (the official apps use the low slots) and lets the steps below go through
+          API slot {API_KEY_INDEX} (the official apps use the low slots) and lets{' '}
+          {scope === 'trading' ? 'pool exits, unstaking, transfers and withdrawals' : 'the steps below'} go through
           Lighter&apos;s API: no gas, instant results. Whenever the API refuses this account, the same action is sent
           through the {l1} contract automatically.
+          {scope === 'trading' &&
+            ` Cancelling orders and closing positions don't need the key: they always go through the ${l1} contract.`}
         </>
       }
       state={stepState}

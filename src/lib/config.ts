@@ -1,6 +1,8 @@
 // Values shared by every Lighter deployment. What differs between them (API,
 // contract, chain ids, explorers) lives in environments.ts.
 
+import type { ContractScope } from './route'
+
 const env = import.meta.env
 
 /** API key slot this page registers for L2-signed actions (unstaking). */
@@ -54,9 +56,15 @@ export const POOL_STATUS = { ACTIVE: 0, FROZEN: 1 } as const
 export const RESTRICTION_ERROR_CODES: ReadonlySet<number> = new Set([52001, 23100])
 
 /**
+ * What the page does for everyone: trading (cancelling orders, closing
+ * positions) is always sent to the contract by the user's own wallet and never
+ * through the API. Every other step tries the API first.
+ */
+export const DEFAULT_CONTRACT_SCOPE: ContractScope = 'trading'
+
+/**
  * Testing aid, off unless the build sets VITE_FORCE_L1_OPTION. When on, the
- * page shows a switch that sends actions to the contract as if the API had
- * refused the account: either only the trading ones (closing positions,
- * cancelling orders) or every action with a contract route.
+ * page shows a switch that changes the scope above: API first for everything,
+ * or every action with a contract route sent to the contract.
  */
 export const FORCE_L1_OPTION = /^(1|true|yes|on)$/i.test((env.VITE_FORCE_L1_OPTION as string | undefined)?.trim() ?? '')

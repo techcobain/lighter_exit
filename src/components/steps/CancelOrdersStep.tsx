@@ -1,6 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query'
 
 import { useActions, isInFlight } from '../../hooks/useActions'
+import { useTradingOnContract } from '../../hooks/useContractScope'
+import { useEnvironment } from '../../hooks/useEnvironment'
 import { useExitAction } from '../../hooks/useExitAction'
 import { accountKey } from '../../hooks/useLighterData'
 import { useRecheckAfterExecution } from '../../hooks/useRecheckAfterExecution'
@@ -30,6 +32,8 @@ export function CancelOrdersStep({
   const { actions } = useActions()
   const { run } = useExitAction()
   const queryClient = useQueryClient()
+  const onContract = useTradingOnContract()
+  const l1 = useEnvironment().l1Name
   const id = `cancel-${accountIndex}-all`
   const state = actions[id]
   // After a cancel executes, the order count on screen may still be the old one: no second send until it is re-read.
@@ -50,7 +54,11 @@ export function CancelOrdersStep({
     <StepCard
       step={1}
       title="Cancel open orders"
-      description="Resting orders lock collateral and can re-open a position you just closed. One request cancels every order on this account across all markets."
+      description={
+        onContract
+          ? `Resting orders lock collateral and can re-open a position you just closed. One transaction to the Lighter contract on ${l1} cancels every order on this account across all markets. It costs gas, and Lighter executes it a couple of minutes after it confirms.`
+          : 'Resting orders lock collateral and can re-open a position you just closed. One request cancels every order on this account across all markets.'
+      }
       state={stepState}
     >
       {hasOrders ? (

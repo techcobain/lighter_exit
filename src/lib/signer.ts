@@ -285,7 +285,7 @@ export function keyDerivationMessage(p: {
     `${p.host} wants you to sign in with your Ethereum account:`,
     p.address,
     '',
-    `Derive the Lighter Exit signing key for account ${p.accountIndex} on ${p.environmentName} (API key ${p.apiKeyIndex}, Lighter chain ${p.lighterChainId}). This page uses it to send close, exit and withdrawal requests to Lighter on your behalf. Signing sends no transaction and costs no gas. Only sign this on ${p.host}.`,
+    `Derive the Lighter Exit signing key for account ${p.accountIndex} on ${p.environmentName} (API key ${p.apiKeyIndex}, Lighter chain ${p.lighterChainId}). This page uses it to send exit and withdrawal requests to Lighter on your behalf. Signing sends no transaction and costs no gas. Only sign this on ${p.host}.`,
     '',
     `URI: ${p.origin}`,
     'Version: 1',

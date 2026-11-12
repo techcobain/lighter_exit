@@ -3,6 +3,8 @@ import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { useActions, isInFlight } from '../../hooks/useActions'
+import { useTradingOnContract } from '../../hooks/useContractScope'
+import { useEnvironment } from '../../hooks/useEnvironment'
 import { useExitAction, type ExitActionRequest } from '../../hooks/useExitAction'
 import { accountKey } from '../../hooks/useLighterData'
 import { useRecheckAfterExecution } from '../../hooks/useRecheckAfterExecution'
@@ -159,6 +161,8 @@ export function ClosePositionsStep({
     0,
   )
 
+  const onContract = useTradingOnContract()
+  const l1 = useEnvironment().l1Name
   const anyInFlight = rows.some((r) => isInFlight(actions[r.item.id]))
   // An executed close stays locked until a later read of the account; if that read still lists the
   // position (partly filled, or capped by the quote limit) it can be sent again for the rest.
@@ -173,7 +177,11 @@ export function ClosePositionsStep({
     <StepCard
       step={step}
       title="Close perp positions"
-      description="Each position is closed with a reduce-only market order for the whole position (Lighter caps very large ones to the market's quote limit; send again if a remainder shows). The price is a bound on the average fill price: the order fills against the live book and stops if going further would push the average past it, leaving the rest open for another try."
+      description={`Each position is closed with a reduce-only market order for the whole position (Lighter caps very large ones to the market's quote limit; send again if a remainder shows). The price is a bound on the average fill price: the order fills against the live book and stops if going further would push the average past it, leaving the rest open for another try.${
+        onContract
+          ? ` Each order is a transaction your wallet sends to the Lighter contract on ${l1}: it costs gas, and Lighter executes it a couple of minutes after it confirms, against the book as it is then.`
+          : ''
+      }`}
       state={stepState}
     >
       {plan.positions.length === 0 ? (
@@ -269,7 +277,9 @@ export function ClosePositionsStep({
             >
               Close all {closable.length > 1 ? `(${closable.length})` : ''}
             </button>
-            {canAct && closable.length > 1 && <span className={HELPER_CLASSNAME}>Positions are closed one after another.</span>}
+            {canAct && closable.length > 1 && <span className={HELPER_CLASSNAME}>
+                {onContract ? 'One wallet confirmation per position, one after another.' : 'Positions are closed one after another.'}
+              </span>}
             {/* Beside the buttons it prices; the Worst price column follows it. */}
             <label className={cn(LABEL_CLASSNAME, 'ml-auto flex items-center gap-2 max-mobile:ml-0 max-mobile:w-full max-mobile:justify-between')}>
               Max slippage

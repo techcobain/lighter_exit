@@ -15,7 +15,7 @@ import { fetchApiKey, fetchNextNonce, isRestrictionError, sendTx } from '../lib/
 import { createClientFromSeed, keyDerivationMessage, loadSigner, signChangePubKey, type DerivedKey } from '../lib/signer'
 
 import { useEnvironment } from './useEnvironment'
-import { useForceL1Scope } from './useForceL1'
+import { useContractScope } from './useContractScope'
 import { useL1Action } from './useL1Action'
 
 export type KeyStage =
@@ -72,7 +72,7 @@ export function SigningKeysProvider({ children }: { children: ReactNode }) {
   const { address } = useAccount()
   const env = useEnvironment()
   // Registering a key is not a trading operation, so only the 'all' scope sends it to the contract.
-  const forceL1 = useForceL1Scope() === 'all'
+  const forceL1 = useContractScope() === 'all'
   const { run: runL1 } = useL1Action()
   const busy = useRef(new Set<number>())
 
@@ -98,7 +98,7 @@ export function SigningKeysProvider({ children }: { children: ReactNode }) {
       patch(accountIndex, {
         stage: 'registering-l1',
         message: forced
-          ? `Contract calls are forced, registering the key through the ${env.l1Name} contract`
+          ? `Testing: everything goes through the contract, registering the key through the ${env.l1Name} contract`
           : `The API refused this account, registering the key through the ${env.l1Name} contract instead`,
       })
       const confirmed = await runL1({

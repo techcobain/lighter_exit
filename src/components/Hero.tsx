@@ -20,9 +20,12 @@ export function Hero() {
       <p className={`${PROSE_CLASSNAME} text-md leading-2xl text-dim`}>
         If you can no longer use the Lighter app, this page lets you wind your
         account down straight from your wallet: close open perp positions, exit
-        public pools, unstake, and withdraw every asset to your wallet. Every
-        step is a transaction you sign yourself, sent directly to Lighter&apos;s
-        contract. Works for Lighter (Ethereum) and Lighter RH (Robinhood Chain).
+        public pools, unstake, and withdraw every asset to your wallet. Nothing
+        is sent without your signature: orders are cancelled and positions
+        closed with transactions your wallet sends to Lighter&apos;s contract,
+        and the other steps go through Lighter&apos;s API, or the contract when
+        the API refuses your account. Works for Lighter (Ethereum) and Lighter
+        RH (Robinhood Chain).
       </p>
       <CornerSpans />
     </div>
