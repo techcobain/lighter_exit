@@ -11,9 +11,9 @@ const env = import.meta.env
 const read = (name: string): string | undefined => (env[name] as string | undefined)?.trim() || undefined
 
 /**
- * Lighter's own API address for a deployment, which the browser calls itself
- * when the server route is rate limited. 'off' disables that; a build that
- * points the server at another Lighter API must set this to match.
+ * Lighter's own API address for a deployment, which the browser calls first;
+ * the server route is the fallback. 'off' sends everything through the server;
+ * a build that points the server at another Lighter API must set this to match.
  */
 const directApi = (name: string, fallback: string): string | null => {
   const value = read(name) ?? fallback
@@ -46,9 +46,9 @@ export interface LighterEnvironment {
   name: string
   /** One-line label that tells the two apart at a glance. */
   tag: string
-  /** Base URL for the REST API, without the /api/v1 suffix. Normally this site's proxy. */
+  /** Base URL for the REST API, without the /api/v1 suffix: this site's proxy, used when the browser cannot reach Lighter. */
   apiBase: string
-  /** Lighter's own API, called from the browser when the proxy is rate limited; null when that is switched off. */
+  /** Lighter's own API, called from the browser first; null when that is switched off. */
   directApiBase: string | null
   /** Lighter L2 chain id used when hashing L2 transactions. */
   lighterChainId: number

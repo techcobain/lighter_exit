@@ -1,7 +1,5 @@
 import { isPreview, isSamplePreview, previewAccountList, previewAssets, previewMarkets, previewNames, previewPools, previewState, PREVIEW_PUBLIC_KEY } from '../dev/preview'
-import { ROUTE_LIMIT_HEADER } from '../../server/policy.mjs'
-
-import { newApiRouteState, sendWithDirectFallback, type ApiRouteState } from './apiFallback'
+import { newApiRouteState, sendDirectFirst, type ApiRouteState, type Failure } from './apiFallback'
 import { API_KEY_INDEX, RESTRICTION_ERROR_CODES } from './config'
 import { activeEnvironment, type EnvironmentId, type LighterEnvironment } from './environments'
 
@@ -20,7 +18,7 @@ export class LighterApiError extends Error {
     message: string,
     public readonly code: number,
     public readonly httpStatus: number,
-    public readonly limit: { retryAfterSec?: number; routeLimited?: boolean } = {},
+    public readonly limit: Pick<Failure, 'retryAfterSec' | 'walletLimited'> = {},
   ) {
     super(message)
     this.name = 'LighterApiError'
@@ -31,20 +29,29 @@ const RATE_LIMITED_MESSAGE = 'Lighter is rate limiting requests right now. Wait 
 
 const NOT_FOUND_CODES = new Set([21100, 21109, 21500])
 
-/** One request to a Lighter API at `base`: this site's proxy, or Lighter itself. */
-async function send<T>(base: string, path: string, init?: RequestInit): Promise<T> {
+/**
+ * A read sent straight to Lighter that has not answered by then is treated as
+ * unreachable, so a block that drops the connection does not leave the page
+ * waiting on the browser's own, much longer, timeout.
+ */
+const DIRECT_READ_TIMEOUT_MS = 15_000
+
+/** One request to a Lighter API at `base`: Lighter itself, or this site's proxy. */
+async function send<T>(base: string, path: string, init?: RequestInit, timeoutMs?: number): Promise<T> {
   let res: Response
   try {
     res = await fetch(`${base}/api/v1${path}`, {
       ...init,
       headers: { accept: 'application/json', ...(init?.headers ?? {}) },
+      ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
     })
   } catch (err) {
     throw new LighterApiError(`Lighter API unreachable: ${err instanceof Error ? err.message : String(err)}`, 0, 0)
   }
   const retryAfter = Number(res.headers.get('retry-after'))
   const retryAfterSec = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined
-  const limit = { retryAfterSec, routeLimited: res.headers.has(ROUTE_LIMIT_HEADER) }
+  // Lighter limits transactions per wallet, so a 429 on sendTx is the same from any address.
+  const limit = { retryAfterSec, walletLimited: res.status === 429 && path.startsWith('/sendTx') }
   // Lighter's firewall answers 405 with a browser challenge page when it is rate limiting the caller.
   if (res.status === 405) throw new LighterApiError(RATE_LIMITED_MESSAGE, 429, 405, limit)
   const text = await res.text()
@@ -63,21 +70,23 @@ async function send<T>(base: string, path: string, init?: RequestInit): Promise<
   return body as T
 }
 
-// Per deployment: whether its server route is rate limited right now, and whether the browser can reach Lighter itself.
+// Per deployment: whether the browser can reach Lighter itself right now.
 const routeStates = new Map<EnvironmentId, ApiRouteState>()
 
 /**
- * Calls the active deployment's API unless another one is named. Goes through
- * this site's server; when that is rate limited, straight to Lighter from the
- * browser (see apiFallback.ts).
+ * Calls the active deployment's API unless another one is named. Goes straight
+ * to Lighter from the browser; through this site's server when the browser is
+ * blocked or rate limited (see apiFallback.ts).
  */
 async function request<T>(path: string, init?: RequestInit, env: LighterEnvironment = activeEnvironment()): Promise<T> {
   let state = routeStates.get(env.id)
   if (!state) routeStates.set(env.id, (state = newApiRouteState()))
   const direct = env.directApiBase && env.directApiBase !== env.apiBase ? env.directApiBase : null
-  return sendWithDirectFallback({
+  // Only reads time out: a transaction may already have reached Lighter, and a resend would fail on its nonce.
+  const timeout = (init?.method ?? 'GET') === 'GET' ? DIRECT_READ_TIMEOUT_MS : undefined
+  return sendDirectFirst({
+    direct: direct ? () => send<T>(direct, path, init, timeout) : null,
     viaServer: () => send<T>(env.apiBase, path, init),
-    direct: direct ? () => send<T>(direct, path, init) : null,
     state,
     failureOf: (err) => (err instanceof LighterApiError ? { httpStatus: err.httpStatus, ...err.limit } : null),
   })

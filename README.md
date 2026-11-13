@@ -34,20 +34,20 @@ being unreachable) that action is sent to the contract as well. The user can
 also choose contract-only mode. The rule is `DEFAULT_CONTRACT_SCOPE` in
 `src/lib/config.ts`, applied by `src/lib/route.ts`.
 
-API requests go through this site's server (`/lighter-api`,
-`/lighter-api-rh`), so Lighter sees the server's address rather than the
-user's. Every user shares that address, and Lighter rate limits it as one
-caller. When the server answers that its route is rate limited (a 429 marked
-`x-exit-route-limited`), the browser sends that request straight to Lighter
-instead and keeps doing so until the server's cooldown is over
-(`src/lib/apiFallback.ts`). If Lighter limits the browser's own address too, the
-direct route is skipped for its cooldown (60 seconds after a 405, a few seconds
-after a 429), following Lighter's documented rate-limit behaviour. A 429 about
-the user's own wallet (transactions are limited per address) is not retried
-from anywhere: it would be the same from any address.
-If the browser cannot reach Lighter itself, the user is told to wait; a rate
-limit is never treated as Lighter refusing the account, so it never sends an
-action to the contract.
+API requests go straight from the browser to Lighter, so Lighter sees each
+user's own address and rate limits each user separately
+(`src/lib/apiFallback.ts`). When the browser cannot reach Lighter (no answer,
+a read that takes over 15 seconds, or a 403/451 block) the request goes
+through this site's server (`/lighter-api`, `/lighter-api-rh`) instead, and so
+does every later request in that visit. Only when the server route is refused
+as well is the action sent to the contract. While Lighter rate limits the
+browser's own address, requests use the server for the cooldown (60 seconds
+after a 405, a few seconds after a 429), following Lighter's documented
+rate-limit behaviour. A 429 about the user's own wallet (transactions are
+limited per address) is not retried from anywhere: it would be the same from
+any address. Any other answer from Lighter is final and is not retried through
+the server. A rate limit is never treated as Lighter refusing the account, so
+it never sends an action to the contract.
 
 ## How it works
 
@@ -109,10 +109,12 @@ extra signature).
   the meantime itself with a 429 marked `x-exit-route-limited`, so nothing it
   sends can prolong the block. A 429 on `sendTx` is different: Lighter limits
   transactions per wallet, not per IP, so it is passed through unchanged and
-  does not pause the server. All users share the
-  server's address towards Lighter, so one heavy client can cause this for
-  everyone; meanwhile browsers call Lighter directly, which the
-  Content-Security-Policy allows for Lighter's two API origins only. The proxy is also rate limited per client
+  does not pause the server. All users who fall back to the server share its
+  address towards Lighter, so one heavy client can cause this for all of them.
+  Browsers call Lighter directly first, which the Content-Security-Policy
+  allows for Lighter's two API origins only. The allowlist applies only to the
+  server: a browser talking to Lighter directly is not limited by it, but the
+  page itself never sends cancel or close orders through the API. The proxy is also rate limited per client
   address, caps POST bodies and concurrent upstream requests, and streams
   responses instead of buffering them. The Vite dev server's proxy does not
   apply these rules.
@@ -173,7 +175,8 @@ The `?preview` walkthrough on sample data exists in development builds only
 The repo ships a `Dockerfile` and `railway.json`. Create a service from the
 repo; Railway builds the image, sets `PORT`, and probes `/healthz`. Pass any
 `VITE_*` values as build args or service variables. Pick a region that is not
-restricted by Lighter, since the proxy's egress IP is what the API sees.
+restricted by Lighter: users whose browser is blocked fall back to the proxy,
+and its egress IP is what the API sees then.
 
 ## Deploy on AWS Lightsail
 
@@ -261,13 +264,15 @@ key's seed, so:
 - The `?preview` walkthrough is for `npm run dev` only. Do not add a way to
   turn it on in a production build.
 - `VITE_FORCE_L1_OPTION` (routing test switch) and `PROXY_ALLOWED_TX_TYPES`
-  (lets the proxy relay orders for that test) are for staging only.
+  (lets the proxy relay orders for that test, needed only when the tester's
+  browser cannot reach Lighter directly) are for staging only.
 - `VITE_*` values are public. No secrets, no RPC URL with a key in it.
 
 ### Other places that are easy to miss
 
-- Which way an API request travels is `src/lib/apiFallback.ts`: the server,
-  or straight to Lighter while the server is rate limited. Keep its one rule:
+- Which way an API request travels is `src/lib/apiFallback.ts`: straight to
+  Lighter, or through the server when the browser is blocked or rate limited.
+  Keep its one rule:
   a rate limit, on either route, is never reported as Lighter refusing the
   account, because a refusal sends the action to the contract and costs gas.
   The direct addresses in `src/lib/environments.ts` must match the ones the
