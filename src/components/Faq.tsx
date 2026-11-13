@@ -7,6 +7,13 @@ import { LABEL_CLASSNAME, LINK_CLASSNAME, PROSE_CLASSNAME } from '../lib/recipes
 /** The host the signing message names; shown so the FAQ and the wallet prompt say the same thing. */
 const SITE = typeof window !== 'undefined' ? window.location.host : 'this address'
 
+/** Whether API requests go through this site's server (false for a static build such as the IPFS one). */
+const VIA_SERVER = ENVIRONMENT_LIST.some((e) => e.apiBase.startsWith('/'))
+
+const RATE_LIMIT_NOTE = VIA_SERVER
+  ? "API requests go straight from your browser to Lighter. If your browser cannot reach Lighter, they go through this site's server instead, and only when that is refused too is the step sent to the contract. A rate limit is not a refusal: the page uses the other route or asks you to wait a minute."
+  : 'API requests go straight from your browser to Lighter. A rate limit is not a refusal: if Lighter is rate limiting your connection, the page asks you to wait a minute.'
+
 const FAQ_ITEMS: { q: string; a: ReactNode }[] = [
   {
     q: 'Who is this for?',
@@ -44,7 +51,7 @@ const FAQ_ITEMS: { q: string; a: ReactNode }[] = [
   },
   {
     q: 'When does it use the contract instead of the API?',
-    a: 'Cancelling orders and closing positions always go to the Lighter contract (on Ethereum for Lighter, on Robinhood Chain for Lighter RH): your wallet sends the transaction, it costs gas, and Lighter picks it up within a couple of minutes. Every other step is first sent to the Lighter API, which is free and executes in seconds. If the API answers that your account is not allowed to use it (or cannot be reached at all), that step is sent to the contract too. Any other rejection, for example "insufficient available shares", is shown as is because it would fail on either route. API requests go straight from your browser to Lighter. If your browser cannot reach Lighter, they go through this site\'s server instead, and only when that is refused too is the step sent to the contract. A rate limit is not a refusal: the page uses the other route or asks you to wait a minute. You can also choose contract-only mode in step 0. Unstaking and freezing a pool exist only on the API.',
+    a: `Cancelling orders and closing positions always go to the Lighter contract (on Ethereum for Lighter, on Robinhood Chain for Lighter RH): your wallet sends the transaction, it costs gas, and Lighter picks it up within a couple of minutes. Every other step is first sent to the Lighter API, which is free and executes in seconds. If the API answers that your account is not allowed to use it (or cannot be reached at all), that step is sent to the contract too. Any other rejection, for example "insufficient available shares", is shown as is because it would fail on either route. ${RATE_LIMIT_NOTE} You can also choose contract-only mode in step 0. Unstaking and freezing a pool exist only on the API.`,
   },
   {
     q: 'How long does each step take?',

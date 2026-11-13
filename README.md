@@ -202,6 +202,35 @@ No AWS credentials are stored in GitHub. As on Railway, the region must be one
 Lighter does not restrict, since the server's outbound address is what the API
 sees.
 
+## Publish on IPFS (Pinata)
+
+`npm run build:ipfs` writes a static copy to `dist-ipfs/`: relative paths (it
+works under `/ipfs/<cid>/` on any gateway), no `.br`/`.gz` files, and the
+Content-Security-Policy as a `<meta>` tag because there is no server to send
+headers. With no server there is no proxy either: the browser calls Lighter's
+APIs directly (both send CORS headers for any origin), so Lighter sees each
+user's own address. A user whose region the API blocks gets a 403, which the
+page treats as a refusal: those steps go to the contract, and the API-only
+steps (unstake, freezing a pool) are not available to them. Set
+`VITE_LIGHTER_API_BASE` / `VITE_LIGHTER_RH_API_BASE` when building to use
+another API address instead.
+
+Upload the whole `dist-ipfs` folder (not its contents one by one) in Pinata
+(Add → Folder), or put a Pinata API key in `.env` as `PINATA_JWT` and run
+`npm run pin:ipfs`, which pins the folder and prints its CID (v1). Before you
+share a link, keep in mind:
+
+- **The signing key is tied to the host.** The key message names
+  `window.location.host`, so every gateway host gives a different key, and each
+  new CID on a subdomain gateway (`<cid>.ipfs.…`) is a new host too. Each new
+  host means one more registration per user. Link to one stable address: a
+  custom domain on a Pinata dedicated gateway, or DNSLink/ENS.
+- **Avoid path gateways for real users** (`gateway.pinata.cloud/ipfs/<cid>`).
+  Every site on that gateway shares one origin, so any other page there can
+  request a signature naming the same host.
+- No `frame-ancestors`, HSTS or `X-Frame-Options`: those exist only as headers,
+  so on IPFS they come from whatever gateway serves the page.
+
 ## Making changes
 
 Read this before changing how the page behaves. Several rules live in more

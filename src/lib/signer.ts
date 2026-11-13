@@ -61,10 +61,10 @@ function loadScript(src: string): Promise<void> {
 export function loadSigner(): Promise<void> {
   if (loading) return loading
   loading = (async () => {
-    if (!window.Go) await loadScript('/wasm_exec.js')
+    if (!window.Go) await loadScript(`${import.meta.env.BASE_URL}wasm_exec.js`)
     if (!window.Go) throw new Error('Go runtime did not initialise')
     const go = new window.Go()
-    const { instance } = await WebAssembly.instantiateStreaming(fetch('/lighter-signer.wasm'), go.importObject)
+    const { instance } = await WebAssembly.instantiateStreaming(fetch(`${import.meta.env.BASE_URL}lighter-signer.wasm`), go.importObject)
     // run() resolves only when the Go program exits, which it never does.
     void go.run(instance)
     const started = Date.now()

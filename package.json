@@ -9,6 +9,8 @@
   "scripts": {
     "dev": "vite",
     "build": "node scripts/verify-wasm.mjs && vite build && node scripts/precompress.mjs",
+    "build:ipfs": "node scripts/verify-wasm.mjs && vite build --mode ipfs",
+    "pin:ipfs": "node --env-file=.env scripts/pin-ipfs.mjs",
     "verify:wasm": "node scripts/verify-wasm.mjs",
     "start": "node server/index.mjs",
     "preview": "vite preview",
