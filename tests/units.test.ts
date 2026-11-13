@@ -149,6 +149,15 @@ describe('buildPlan', () => {
     expect(plan.isEmpty).toBe(false)
   })
 
+  it('marks a position whose market only the server lists as contract-only, at the same size', () => {
+    const unlisted = new Map([...markets].map(([id, m]) => [id, { ...m, browser_unlisted: true }]))
+    const plan = buildPlan(account, unlisted, assets, {})
+    expect(plan.positions[0]?.contractOnly).toBe(true)
+    expect(plan.positions[0]?.blocked).toBeNull()
+    expect(plan.positions[0]?.baseAmount).toBe(22n)
+    expect(buildPlan(account, markets, assets, {}).positions[0]?.contractOnly).toBe(false)
+  })
+
   it('reports an account holding only dust as empty', () => {
     const plan = buildPlan(
       { ...account, positions: [], shares: [], available_balance: '0', assets: account.assets.filter((a) => a.asset_id !== 3) },

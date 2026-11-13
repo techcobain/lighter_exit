@@ -4,7 +4,7 @@ import { useActions, isInFlight } from '../../hooks/useActions'
 import { useTradingOnContract } from '../../hooks/useContractScope'
 import { useEnvironment } from '../../hooks/useEnvironment'
 import { useExitAction } from '../../hooks/useExitAction'
-import { accountKey } from '../../hooks/useLighterData'
+import { accountKey, useRegionRestricted } from '../../hooks/useLighterData'
 import { useRecheckAfterExecution } from '../../hooks/useRecheckAfterExecution'
 import { TX_TYPE } from '../../lib/config'
 import { BTN_PRIMARY_CLASSNAME } from '../../lib/recipes'
@@ -32,7 +32,8 @@ export function CancelOrdersStep({
   const { actions } = useActions()
   const { run } = useExitAction()
   const queryClient = useQueryClient()
-  const onContract = useTradingOnContract()
+  const regionRestricted = useRegionRestricted()
+  const onContract = useTradingOnContract() || regionRestricted
   const l1 = useEnvironment().l1Name
   const id = `cancel-${accountIndex}-all`
   const state = actions[id]
@@ -56,8 +57,8 @@ export function CancelOrdersStep({
       title="Cancel open orders"
       description={
         onContract
-          ? `Resting orders lock collateral and can re-open a position you just closed. One transaction to the Lighter contract on ${l1} cancels every order on this account across all markets. It costs gas, and Lighter executes it a couple of minutes after it confirms.`
-          : 'Resting orders lock collateral and can re-open a position you just closed. One request cancels every order on this account across all markets.'
+          ? `Resting orders lock collateral and can re-open a position you just closed. One transaction to the Lighter contract on ${l1} cancels every order on this account across all markets. It costs gas, and Lighter executes it a couple of minutes after it confirms.${regionRestricted ? ' Lighter does not accept API transactions from your region, so this goes through the contract.' : ''}`
+          : `Resting orders lock collateral and can re-open a position you just closed. One API request from your browser cancels every order on this account across all markets. If your browser cannot reach Lighter's API, it is sent as a transaction to the Lighter contract on ${l1} instead, which costs gas and executes a couple of minutes after it confirms.`
       }
       state={stepState}
     >

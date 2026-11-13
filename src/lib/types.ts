@@ -75,6 +75,8 @@ export interface MarketDetails {
   min_base_amount: string
   mark_price?: string
   last_trade_price?: number
+  /** Missing from the market list Lighter gives this browser; details from this site's server (fetchServerMarkets). */
+  browser_unlisted?: boolean
 }
 
 export interface AssetDetails {

@@ -51,16 +51,18 @@ export const POOL_STATUS = { ACTIVE: 0, FROZEN: 1 } as const
 /**
  * API error codes that mean "this account may not use the API for this", in
  * which case the same action is sent through the Ethereum contract instead.
- * 52001: blacklist blocks the action. 23100: permission forbidden.
+ * 52001: blacklist blocks the action. 23100: permission forbidden. 20558:
+ * restricted jurisdiction (Lighter's edge, normally with HTTP 403).
  */
-export const RESTRICTION_ERROR_CODES: ReadonlySet<number> = new Set([52001, 23100])
+export const RESTRICTION_ERROR_CODES: ReadonlySet<number> = new Set([52001, 23100, 20558])
 
 /**
- * What the page does for everyone: trading (cancelling orders, closing
- * positions) is always sent to the contract by the user's own wallet and never
- * through the API. Every other step tries the API first.
+ * What the page does for everyone: every step tries the API first. Trading
+ * (cancelling orders, closing positions) reaches the API only from the user's
+ * own browser, never through this site's server (lighterApi.ts, sendTx); when
+ * the browser cannot reach Lighter it goes to the contract instead.
  */
-export const DEFAULT_CONTRACT_SCOPE: ContractScope = 'trading'
+export const DEFAULT_CONTRACT_SCOPE: ContractScope = 'none'
 
 /**
  * Testing aid, off unless the build sets VITE_FORCE_L1_OPTION. When on, the

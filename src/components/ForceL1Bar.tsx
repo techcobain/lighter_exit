@@ -16,9 +16,9 @@ const OPTIONS: { scope: ContractScope; label: string }[] = [
 function describe(scope: ContractScope, l1: string): string {
   switch (scope) {
     case 'none':
-      return `Testing only: every step tries the API first, cancelling orders and closing positions included. The ${l1} contract is used only when the API refuses the account.`
+      return `What the live site does: every step tries the API first, from this browser. Cancelling orders and closing positions are never relayed by this site's server; if the browser cannot reach Lighter they go to the ${l1} contract.`
     case 'trading':
-      return `What the live site does: cancelling orders and closing positions are sent to the ${l1} contract and cost gas. Key registration, withdrawals, transfers and pool steps try the API first.`
+      return `Testing only: cancelling orders and closing positions are sent to the ${l1} contract and cost gas. Key registration, withdrawals, transfers and pool steps try the API first.`
     case 'all':
       return `Testing only: key registration and every step with a contract route are sent to the ${l1} contract and cost gas, as if the API had refused this account. Unstaking and freezing a pool still use the API.`
   }

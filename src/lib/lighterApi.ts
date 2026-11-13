@@ -1,4 +1,6 @@
 import { isPreview, isSamplePreview, previewAccountList, previewAssets, previewMarkets, previewNames, previewPools, previewState, PREVIEW_PUBLIC_KEY } from '../dev/preview'
+import { DEFAULT_ALLOWED_TX_TYPES } from '../../server/policy.mjs'
+
 import { newApiRouteState, sendDirectFirst, type ApiRouteState, type Failure } from './apiFallback'
 import { API_KEY_INDEX, RESTRICTION_ERROR_CODES } from './config'
 import { activeEnvironment, type EnvironmentId, type LighterEnvironment } from './environments'
@@ -73,24 +75,86 @@ async function send<T>(base: string, path: string, init?: RequestInit, timeoutMs
 // Per deployment: whether the browser can reach Lighter itself right now.
 const routeStates = new Map<EnvironmentId, ApiRouteState>()
 
+function routeState(env: LighterEnvironment): ApiRouteState {
+  let state = routeStates.get(env.id)
+  if (!state) routeStates.set(env.id, (state = newApiRouteState()))
+  return state
+}
+
+/**
+ * Where a deployment's API is. A relative API base is this site's server. An
+ * absolute one (the IPFS build) is Lighter itself, so that build has no server
+ * route and calls Lighter directly.
+ */
+function apiBases(env: LighterEnvironment): { direct: string | null; server: string | null } {
+  const viaProxy = env.apiBase.startsWith('/')
+  return { direct: viaProxy ? env.directApiBase : env.apiBase, server: viaProxy ? env.apiBase : null }
+}
+
+/** Code Lighter's edge answers (with HTTP 403) to a region it restricts. */
+const RESTRICTED_JURISDICTION_CODE = 20558
+
 /**
  * Calls the active deployment's API unless another one is named. Goes straight
  * to Lighter from the browser; through this site's server when the browser is
- * blocked or rate limited (see apiFallback.ts).
+ * blocked or rate limited (see apiFallback.ts), unless `serverAllowed` is false.
  */
-async function request<T>(path: string, init?: RequestInit, env: LighterEnvironment = activeEnvironment()): Promise<T> {
-  let state = routeStates.get(env.id)
-  if (!state) routeStates.set(env.id, (state = newApiRouteState()))
-  const direct = env.directApiBase && env.directApiBase !== env.apiBase ? env.directApiBase : null
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  env: LighterEnvironment = activeEnvironment(),
+  serverAllowed = true,
+): Promise<T> {
+  const { direct, server } = apiBases(env)
+  const write = (init?.method ?? 'GET') !== 'GET'
   // Only reads time out: a transaction may already have reached Lighter, and a resend would fail on its nonce.
-  const timeout = (init?.method ?? 'GET') === 'GET' ? DIRECT_READ_TIMEOUT_MS : undefined
+  const timeout = write ? undefined : DIRECT_READ_TIMEOUT_MS
   return sendDirectFirst({
     direct: direct ? () => send<T>(direct, path, init, timeout) : null,
-    viaServer: () => send<T>(env.apiBase, path, init),
-    state,
-    failureOf: (err) => (err instanceof LighterApiError ? { httpStatus: err.httpStatus, ...err.limit } : null),
+    viaServer: serverAllowed && server ? () => send<T>(server, path, init) : null,
+    state: routeState(env),
+    write,
+    failureOf: (err) =>
+      err instanceof LighterApiError
+        ? { httpStatus: err.code === RESTRICTED_JURISDICTION_CODE ? 403 : err.httpStatus, ...err.limit }
+        : null,
+    noRoute: (reason) =>
+      reason === 'limited'
+        ? new LighterApiError(RATE_LIMITED_MESSAGE, 429, 429)
+        : new LighterApiError('Lighter does not accept transactions from this browser', 0, 0),
   })
 }
+
+/**
+ * Whether Lighter restricts this browser's region, from the check Lighter's own
+ * app uses: GET /geoLocation answers 200 unless the edge blocks the caller (403,
+ * code 20558). Asked straight from the browser, never through the server, whose
+ * region says nothing about the user's. When restricted, transactions skip the
+ * direct route from then on (reads keep using it), so trading goes to the
+ * contract without a refused attempt first. Unknown (no direct route, an outage)
+ * counts as not restricted: a refused transaction still finds out.
+ */
+export async function fetchRegionRestricted(env: LighterEnvironment = activeEnvironment()): Promise<boolean> {
+  if (isPreview) return false
+  const { direct } = apiBases(env)
+  if (!direct) return false
+  try {
+    await send(direct, '/geoLocation', undefined, DIRECT_READ_TIMEOUT_MS)
+    return false
+  } catch (err) {
+    if (!(err instanceof LighterApiError)) return false
+    const restricted = err.code === RESTRICTED_JURISDICTION_CODE || err.httpStatus === 403 || err.httpStatus === 451
+    if (restricted) routeState(env).directWritesBlocked = true
+    return restricted
+  }
+}
+
+/**
+ * Transaction types this site's server relays (server/policy.mjs). The rest,
+ * trading (orders and cancels), go to Lighter only from the user's own browser:
+ * relaying them would let a blocked user trade from the server's address.
+ */
+const SERVER_TX_TYPES: ReadonlySet<number> = new Set(DEFAULT_ALLOWED_TX_TYPES)
 
 export function isNotFound(err: unknown): boolean {
   return err instanceof LighterApiError && NOT_FOUND_CODES.has(err.code)
@@ -154,14 +218,28 @@ export async function fetchPoolInfo(index: number): Promise<PoolInfo> {
 
 export async function fetchMarkets(): Promise<Map<number, MarketDetails>> {
   if (isSamplePreview()) return previewMarkets
-  const res = await request<{
-    order_book_details: MarketDetails[]
-    spot_order_book_details?: MarketDetails[]
-  }>('/orderBookDetails')
+  return marketsFrom(await request<OrderBookDetails>('/orderBookDetails'))
+}
+
+type OrderBookDetails = { order_book_details: MarketDetails[]; spot_order_book_details?: MarketDetails[] }
+
+function marketsFrom(res: OrderBookDetails): Map<number, MarketDetails> {
   const map = new Map<number, MarketDetails>()
   for (const m of res.order_book_details ?? []) map.set(m.market_id, { ...m, market_type: 'perp' })
   for (const m of res.spot_order_book_details ?? []) map.set(m.market_id, { ...m, market_type: 'spot' })
   return map
+}
+
+/**
+ * Markets as this site's server sees them. For a position whose market is
+ * missing from the browser's list, the page needs the market's decimals and
+ * mark price to close it through the contract (never through the API). Empty
+ * when there is no server (the IPFS build).
+ */
+export async function fetchServerMarkets(env: LighterEnvironment = activeEnvironment()): Promise<Map<number, MarketDetails>> {
+  const { server } = apiBases(env)
+  if (isSamplePreview() || !server) return new Map()
+  return marketsFrom(await send<OrderBookDetails>(server, '/orderBookDetails'))
 }
 
 export async function fetchAssets(): Promise<Map<number, AssetDetails>> {
@@ -249,11 +327,16 @@ export async function fetchWithdrawalDelaySeconds(): Promise<number | null> {
 export async function sendTx(txType: number, txInfo: string): Promise<SendTxResponse> {
   if (isPreview) return { code: 200, tx_hash: `preview-${txType}-${Date.now()}` }
   const form = new URLSearchParams({ tx_type: String(txType), tx_info: txInfo })
-  return request<SendTxResponse>('/sendTx', {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: form.toString(),
-  })
+  return request<SendTxResponse>(
+    '/sendTx',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    },
+    activeEnvironment(),
+    SERVER_TX_TYPES.has(txType),
+  )
 }
 
 /**

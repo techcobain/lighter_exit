@@ -31,10 +31,15 @@ describe('chooseRoute', () => {
 })
 
 describe('alwaysContract', () => {
-  it('sends trading to the contract by default and leaves the rest on the API', () => {
-    expect(DEFAULT_CONTRACT_SCOPE).toBe('trading')
-    expect(alwaysContract(DEFAULT_CONTRACT_SCOPE, true)).toBe(true)
+  it('tries the API first for everything by default, trading included', () => {
+    expect(DEFAULT_CONTRACT_SCOPE).toBe('none')
+    expect(alwaysContract(DEFAULT_CONTRACT_SCOPE, true)).toBe(false)
     expect(alwaysContract(DEFAULT_CONTRACT_SCOPE, false)).toBe(false)
+  })
+
+  it('sends trading to the contract in the trading scope and leaves the rest on the API', () => {
+    expect(alwaysContract('trading', true)).toBe(true)
+    expect(alwaysContract('trading', false)).toBe(false)
   })
 
   it('sends nothing to the contract up front in the API-first scope', () => {
@@ -47,8 +52,8 @@ describe('alwaysContract', () => {
     expect(alwaysContract('all', false)).toBe(true)
   })
 
-  it('routes a close to the contract even with a registered key, and a withdrawal to the API', () => {
-    const scope = DEFAULT_CONTRACT_SCOPE
+  it('in the trading scope, routes a close to the contract even with a registered key, and a withdrawal to the API', () => {
+    const scope = 'trading'
     expect(chooseRoute({ ...base, forceL1: alwaysContract(scope, true) })).toBe('l1')
     expect(chooseRoute({ ...base, forceL1: alwaysContract(scope, false) })).toBe('api')
   })

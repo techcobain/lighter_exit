@@ -4,6 +4,8 @@
 // 403/451 regional block), the request goes through this site's server instead,
 // and keeps doing so for the rest of the visit. While Lighter is rate limiting
 // the browser's own address, the server is used until that cooldown is over.
+// Trading transactions have no server route at all: the server never relays
+// them, because that would send a blocked user's orders from another address.
 // Kept free of fetch so it can be tested.
 //
 // Cooldowns follow Lighter's docs (developers/reference/rate-limits): a 405 is
@@ -14,11 +16,16 @@
 export interface ApiRouteState {
   /** Until then Lighter is rate limiting this browser's own address; requests go through the server. */
   directLimitedUntil: number
-  /** The browser cannot reach Lighter directly (no network path or a regional block); stop trying. */
+  /** The browser cannot reach Lighter directly at all; stop trying. */
   directUnusable: boolean
+  /**
+   * Lighter refuses transactions from this browser (its regional block, which lets reads through),
+   * found by a refused transaction or by Lighter's geoLocation check. Reads still go direct.
+   */
+  directWritesBlocked: boolean
 }
 
-export const newApiRouteState = (): ApiRouteState => ({ directLimitedUntil: 0, directUnusable: false })
+export const newApiRouteState = (): ApiRouteState => ({ directLimitedUntil: 0, directUnusable: false, directWritesBlocked: false })
 
 /** What is known about a failed attempt. */
 export interface Failure {
@@ -53,27 +60,43 @@ const cooldownFor = (failure: Failure): number =>
  * from what both routes answered, and a rate limit never looks like one.
  */
 export async function sendDirectFirst<T>(opts: {
-  /** Null when there is no separate direct route (switched off, or the build already calls Lighter directly). */
+  /** Null when the browser has no route to Lighter of its own (switched off). */
   direct: (() => Promise<T>) | null
-  viaServer: () => Promise<T>
+  /** Null when this request may not go through the server (trading), or there is no server. */
+  viaServer: (() => Promise<T>) | null
   state: ApiRouteState
   /** Null for an error that is not an HTTP-level failure. */
   failureOf: (err: unknown) => Failure | null
+  /**
+   * The error to report when neither route can be used: 'blocked' (the browser cannot reach Lighter,
+   * which the caller treats as a refusal) or 'limited' (Lighter is rate limiting the browser).
+   */
+  noRoute: (reason: 'blocked' | 'limited') => Error
+  /** A transaction (sendTx) rather than a read. */
+  write?: boolean
   now?: () => number
 }): Promise<T> {
   const { direct, viaServer, state, failureOf } = opts
   const now = opts.now ?? Date.now
 
-  if (direct && !state.directUnusable && now() >= state.directLimitedUntil) {
+  const blocked = state.directUnusable || (!!opts.write && state.directWritesBlocked)
+  let skipped: 'blocked' | 'limited' = 'blocked'
+  if (direct && !blocked && now() >= state.directLimitedUntil) {
     try {
       return await direct()
     } catch (err) {
       const failure = failureOf(err)
       if (!failure || failure.walletLimited) throw err
-      if (isBlockedStatus(failure.httpStatus)) state.directUnusable = true
-      else if (failure.httpStatus === 429 || failure.httpStatus === 405) state.directLimitedUntil = now() + cooldownFor(failure)
+      if (isBlockedStatus(failure.httpStatus)) {
+        if (opts.write) state.directWritesBlocked = true
+        else state.directUnusable = true
+      } else if (failure.httpStatus === 429 || failure.httpStatus === 405) state.directLimitedUntil = now() + cooldownFor(failure)
       else throw err
+      if (!viaServer) throw err
     }
+  } else if (direct && !blocked) {
+    skipped = 'limited'
   }
+  if (!viaServer) throw opts.noRoute(skipped)
   return viaServer()
 }

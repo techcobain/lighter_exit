@@ -134,10 +134,21 @@ const IPFS_API_DEFAULTS = {
   VITE_LIGHTER_RH_API_BASE: DEFAULT_UPSTREAMS['/lighter-api-rh'],
 }
 
+/**
+ * The link-preview image (index.html, og:image and twitter:image). Crawlers need
+ * an absolute URL, and a page on IPFS cannot know its own host, so each build
+ * names one: the production domain, or the ENS name the IPFS copy is served at.
+ */
+const OG_IMAGE_DEFAULTS = {
+  server: 'https://exit.lighter.xyz/og.png',
+  ipfs: 'https://exit.lighter.eth.limo/og.png',
+}
+
 export default defineConfig(({ mode }) => {
   const ipfs = mode === 'ipfs'
-  // Set before Vite reads the environment, so the bundle and the CSP see the same values.
+  // Set before Vite reads the environment, so the bundle, the CSP and index.html see the same values.
   if (ipfs) for (const [name, value] of Object.entries(IPFS_API_DEFAULTS)) process.env[name] ||= value
+  process.env.VITE_OG_IMAGE_URL ||= ipfs ? OG_IMAGE_DEFAULTS.ipfs : OG_IMAGE_DEFAULTS.server
   const env = loadEnv(mode, process.cwd(), 'VITE_')
   return {
     base: ipfs ? './' : '/',

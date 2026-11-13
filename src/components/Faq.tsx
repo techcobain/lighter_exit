@@ -11,13 +11,13 @@ const SITE = typeof window !== 'undefined' ? window.location.host : 'this addres
 const VIA_SERVER = ENVIRONMENT_LIST.some((e) => e.apiBase.startsWith('/'))
 
 const RATE_LIMIT_NOTE = VIA_SERVER
-  ? "API requests go straight from your browser to Lighter. If your browser cannot reach Lighter, they go through this site's server instead, and only when that is refused too is the step sent to the contract. A rate limit is not a refusal: the page uses the other route or asks you to wait a minute."
+  ? "API requests go straight from your browser to Lighter. If your browser cannot reach Lighter, most steps go through this site's server instead, and only when that is refused too is the step sent to the contract. Cancelling orders and closing positions never go through this site's server: if your browser cannot reach Lighter they go to the contract. A rate limit is not a refusal: the page uses the other route or asks you to wait a minute."
   : 'API requests go straight from your browser to Lighter. A rate limit is not a refusal: if Lighter is rate limiting your connection, the page asks you to wait a minute.'
 
 const FAQ_ITEMS: { q: string; a: ReactNode }[] = [
   {
     q: 'Who is this for?',
-    a: 'Anyone who can no longer use the Lighter app, for example because their region is restricted, but still has positions, pool shares, stake or balances on Lighter. Everything here is signed by your own wallet. Cancelling orders and closing positions are calls to the Lighter contract; the other steps are Lighter API requests, or contract calls when the API refuses your account.',
+    a: 'Anyone who can no longer use the Lighter app, for example because their region is restricted, but still has positions, pool shares, stake or balances on Lighter. Everything here is signed by your own wallet. Each step is a Lighter API request, or a call to the Lighter contract when the API refuses your account or can\'t be reached.',
   },
   {
     q: 'Lighter or Lighter RH: which one does this page use?',
@@ -28,8 +28,8 @@ const FAQ_ITEMS: { q: string; a: ReactNode }[] = [
     a: (
       <>
         Top to bottom. Unlock API signing once, then cancel orders, close perp positions, exit pools and unstake, because
-        they all release assets into the account. Cancelling orders and closing positions are contract transactions, so
-        keep some gas in your wallet. Then withdraw. Assets that come back from unstaking land after the{' '}
+        they all release assets into the account. Keep some gas in your wallet in case a step has to go through the
+        contract. Then withdraw. Assets that come back from unstaking land after the{' '}
         {UNSTAKE_PERIOD_DAYS}-day period, so you will need to return once more to withdraw them. Finally check the last
         card for anything parked in the contract waiting to be claimed.
       </>
@@ -42,8 +42,8 @@ const FAQ_ITEMS: { q: string; a: ReactNode }[] = [
         Requests to the Lighter API are L2 transactions signed with a Lighter API key, not with your Ethereum key. Your wallet
         signs a fixed message and the signature seeds such a key, so the same wallet always produces the same key and
         nothing is stored anywhere. The message names this site ({SITE}) and the Lighter deployment: only sign it here, and treat a wallet
-        warning about a mismatched site as a phishing attempt. The page uses the key for pool exits, unstaking, transfers
-        and withdrawals; orders are cancelled and positions closed through the contract, without it. The key is registered on your account at slot {API_KEY_INDEX} (the official apps use
+        warning about a mismatched site as a phishing attempt. The page uses the key for every step it sends through the
+        API: cancelling orders, closing positions, pool exits, unstaking, transfers and withdrawals. The key is registered on your account at slot {API_KEY_INDEX} (the official apps use
         slots 0 to 3) through the API, or through the contract if the API refuses. It can only act on your Lighter
         account, never on your wallet, and you can revoke it from the Lighter app if you regain access.
       </>
@@ -51,15 +51,15 @@ const FAQ_ITEMS: { q: string; a: ReactNode }[] = [
   },
   {
     q: 'When does it use the contract instead of the API?',
-    a: `Cancelling orders and closing positions always go to the Lighter contract (on Ethereum for Lighter, on Robinhood Chain for Lighter RH): your wallet sends the transaction, it costs gas, and Lighter picks it up within a couple of minutes. Every other step is first sent to the Lighter API, which is free and executes in seconds. If the API answers that your account is not allowed to use it (or cannot be reached at all), that step is sent to the contract too. Any other rejection, for example "insufficient available shares", is shown as is because it would fail on either route. ${RATE_LIMIT_NOTE} You can also choose contract-only mode in step 0. Unstaking and freezing a pool exist only on the API.`,
+    a: `Once you have unlocked API signing in step 0, every step is first sent to the Lighter API, which is free and executes in seconds. If the API answers that your account is not allowed to use it, or cannot be reached at all, that step is sent to the Lighter contract instead (on Ethereum for Lighter, on Robinhood Chain for Lighter RH): your wallet sends the transaction, it costs gas, and Lighter picks it up within a couple of minutes. When Lighter does not accept API transactions from your region, which the page checks when it loads, cancelling orders and closing positions go straight to the contract. Any other rejection, for example "insufficient available shares", is shown as is because it would fail on either route. ${RATE_LIMIT_NOTE} You can also choose contract-only mode in step 0. Unstaking and freezing a pool exist only on the API.`,
   },
   {
     q: 'How long does each step take?',
-    a: 'API requests execute within seconds and the page shows "Executed" or the rejection reason. Contract transactions, which include every order cancellation and position close, confirm on their chain first, then Lighter picks them up and executes them, usually within about two minutes; the page watches for that. Withdrawals then take Lighter\'s current withdrawal delay (shown in step 5) before the tokens arrive in your wallet.',
+    a: 'API requests execute within seconds and the page shows "Executed" or the rejection reason. Contract transactions confirm on their chain first, then Lighter picks them up and executes them, usually within about two minutes; the page watches for that. Withdrawals then take Lighter\'s current withdrawal delay (shown in step 5) before the tokens arrive in your wallet.',
   },
   {
     q: 'How are positions closed?',
-    a: 'With a reduce-only market order, sent as a transaction to the Lighter contract. The "worst price" is a bound derived from the current mark price and the slippage you set (above 10% the page asks you to confirm first): the order fills against the live order book but never worse than that bound. Lighter executes the order a couple of minutes after you send it, so the market can move in between; if the book is thinner than your bound by then, or the price has moved past it, the leftover is cancelled and you can send another order. Reduce-only orders can never open or flip a position.',
+    a: 'With a reduce-only market order, sent to the Lighter API from your browser, or as a transaction to the Lighter contract when the API can\'t be used. The "worst price" is a bound derived from the current mark price and the slippage you set (above 10% the page asks you to confirm first): the order fills against the live order book but never worse than that bound. Through the contract, Lighter executes the order a couple of minutes after you send it, so the market can move in between; if the book is thinner than your bound by then, or the price has moved past it, the leftover is cancelled and you can send another order. Reduce-only orders can never open or flip a position.',
   },
   {
     q: 'I operate a public pool. How do I close it?',

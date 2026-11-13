@@ -28,6 +28,8 @@ export interface ClosePositionItem {
   isAsk: 0 | 1
   /** Set when the market is missing or halted. */
   blocked: string | null
+  /** The market is missing from the browser's market list: closed through the contract only. */
+  contractOnly: boolean
 }
 
 export interface PoolShareItem {
@@ -116,6 +118,7 @@ export function buildPlan(
       baseAmount: market ? toBaseUnits(absDecimal(p.position), sizeDecimals) : 0n,
       isAsk: side === 'long' ? 1 : 0,
       blocked,
+      contractOnly: !!market?.browser_unlisted,
     })
   }
 

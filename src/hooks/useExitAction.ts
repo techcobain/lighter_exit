@@ -1,9 +1,11 @@
-// Runs one exit action. Trading actions (cancelling orders, closing
-// positions) always go to the L1 contract (Ethereum, or Robinhood Chain for
-// Lighter RH), sent by the user's wallet. Every other action tries the API
-// first (an L2 transaction signed with the account's derived key, free and
-// instant) and falls back to the contract when the API refuses the account or
-// the user opted into contract-only mode. See chooseRoute and alwaysContract.
+// Runs one exit action. Every action tries the API first (an L2 transaction
+// signed with the account's derived key, free and instant) and falls back to
+// the L1 contract (Ethereum, or Robinhood Chain for Lighter RH), sent by the
+// user's wallet, when the API refuses the account or cannot be reached, or the
+// user opted into contract-only mode. Trading actions (cancelling orders,
+// closing positions) reach the API only from the browser, never through this
+// site's server, so a browser that cannot reach Lighter sends them to the
+// contract. See chooseRoute, alwaysContract and lighterApi.sendTx.
 
 import { useCallback } from 'react'
 
@@ -16,6 +18,7 @@ import { fetchNextNonce, fetchTxByHash, isExecuted, isRestrictionError, l2Execut
 import { alwaysContract, chooseRoute } from '../lib/route'
 
 import { useActions } from './useActions'
+import { useRegionRestricted } from './useLighterData'
 import { useEnvironment } from './useEnvironment'
 import { useContractScope } from './useContractScope'
 import { useL1Action, type L1ActionRequest } from './useL1Action'
@@ -28,8 +31,10 @@ export interface ExitActionRequest {
   label: string
   /** Account whose key signs the API transaction. */
   accountIndex: number
-  /** Places or cancels orders. These go to the contract, never through the API, unless a tester changed the scope. */
+  /** Places or cancels orders: never relayed by this site's server; the testing switch can send them to the contract. */
   trading?: boolean
+  /** Contract only: the API is not tried (a close in a market missing from the browser's market list). */
+  forceContract?: boolean
   l2?: { txType: number; sign: (nonce: number) => Promise<SignedTx> }
   /** Contract fallback; omit for actions that only exist on L2 (unstake, freeze). */
   l1?: L1ActionRequest
@@ -43,6 +48,8 @@ export function useExitAction() {
   const { update } = useActions()
   const { keys, mode } = useSigningKeys()
   const scope = useContractScope()
+  // Lighter refuses transactions from this region, and trading never goes through the server: straight to the contract.
+  const regionRestricted = useRegionRestricted()
   const { run: runL1 } = useL1Action()
   const queryClient = useQueryClient()
   const l1 = useEnvironment().l1Name
@@ -58,7 +65,7 @@ export function useExitAction() {
   const run = useCallback(
     async (req: ExitActionRequest): Promise<boolean> => {
       const { id, label } = req
-      const forceL1 = alwaysContract(scope, !!req.trading)
+      const forceL1 = alwaysContract(scope, !!req.trading) || !!req.forceContract || (!!req.trading && regionRestricted)
       if (isPreview) {
         const route = chooseRoute({ mode, forceL1, hasL2: !!req.l2, hasL1: !!req.l1, keyReady: true }) === 'api' ? 'api' : 'l1'
         const steps: [Parameters<typeof update>[1]['status'], string][] =
@@ -127,7 +134,7 @@ export function useExitAction() {
         return false
       }
     },
-    [invalidate, keys, l1, mode, runL1, scope, update],
+    [invalidate, keys, l1, mode, regionRestricted, runL1, scope, update],
   )
 
   /** Runs requests one after another; stops at the first failure. */

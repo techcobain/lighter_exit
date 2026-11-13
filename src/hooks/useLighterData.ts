@@ -14,6 +14,8 @@ import {
   fetchAssets,
   fetchMarkets,
   fetchPoolInfo,
+  fetchRegionRestricted,
+  fetchServerMarkets,
   fetchWithdrawalDelaySeconds,
 } from '../lib/lighterApi'
 
@@ -95,6 +97,15 @@ export function useMarkets() {
   })
 }
 
+/** Whether Lighter refuses transactions from this browser's region (see fetchRegionRestricted). */
+export function useRegionRestricted(): boolean {
+  const env = activeEnvironment()
+  return (
+    useQuery({ queryKey: ['regionRestricted', env.id], queryFn: () => fetchRegionRestricted(env), staleTime: 5 * 60_000, retry: false })
+      .data === true
+  )
+}
+
 export function useAssets() {
   return useQuery({ queryKey: ['assets', envId()], queryFn: fetchAssets, staleTime: 5 * 60_000 })
 }
@@ -127,7 +138,33 @@ export function usePools(indexes: number[]) {
 }
 
 export function useExitPlan(account: DetailedAccount | undefined) {
-  const markets = useMarkets()
+  const browserMarkets = useMarkets()
+  // Markets of open positions that are missing from the list Lighter gives this browser.
+  const unlistedIds = useMemo(
+    () =>
+      browserMarkets.data
+        ? (account?.positions ?? [])
+            .filter((p) => Number(p.position) !== 0)
+            .map((p) => p.market_id)
+            .filter((id) => !browserMarkets.data!.has(id))
+        : [],
+    [account, browserMarkets.data],
+  )
+  const serverMarkets = useQuery({
+    queryKey: ['serverMarkets', envId()],
+    queryFn: () => fetchServerMarkets(),
+    enabled: unlistedIds.length > 0,
+    staleTime: 30_000,
+  })
+  const marketsData = useMemo(() => {
+    if (!browserMarkets.data || unlistedIds.length === 0 || !serverMarkets.data) return browserMarkets.data
+    const data = new Map(browserMarkets.data)
+    for (const id of unlistedIds) {
+      const m = serverMarkets.data.get(id)
+      if (m) data.set(id, { ...m, browser_unlisted: true })
+    }
+    return data
+  }, [browserMarkets.data, unlistedIds, serverMarkets.data])
   const assets = useAssets()
   const poolIndexes = useMemo(
     () => (account?.shares ?? []).filter((s) => s.shares_amount > 0).map((s) => s.public_pool_index),
@@ -135,14 +172,16 @@ export function useExitPlan(account: DetailedAccount | undefined) {
   )
   const pools = usePools(poolIndexes)
   const plan = useMemo(() => {
-    if (!account || !markets.data || !assets.data) return null
-    return buildPlan(account, markets.data, assets.data, pools)
-  }, [account, markets.data, assets.data, pools])
+    // Wait for the server's copy of those markets rather than briefly showing them as unavailable.
+    const waitingForUnlisted = unlistedIds.length > 0 && serverMarkets.isPending
+    if (!account || !marketsData || !assets.data || waitingForUnlisted) return null
+    return buildPlan(account, marketsData, assets.data, pools)
+  }, [account, marketsData, assets.data, pools, unlistedIds.length, serverMarkets.isPending])
   return {
     plan,
-    isLoading: !plan && (markets.isPending || assets.isPending),
-    error: markets.error ?? assets.error ?? null,
-    markets: markets.data,
+    isLoading: !plan && (browserMarkets.isPending || assets.isPending || (unlistedIds.length > 0 && serverMarkets.isPending)),
+    error: browserMarkets.error ?? assets.error ?? null,
+    markets: marketsData,
     assets: assets.data,
   }
 }

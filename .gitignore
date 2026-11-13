@@ -1,8 +1,9 @@
 node_modules/
 dist/
-dist-ipfs/
+dist-ipfs*/
 .env
 .env.*
 !.env.example
 *.log
 .DS_Store
+*.safe-batch.json

@@ -24,14 +24,26 @@ address; after that only the user changes it. Action history and unlocked keys
 are dropped on a switch, and a signing key unlocked on one deployment cannot
 sign for the other (`src/lib/environments.ts`, `src/lib/signer.ts`).
 
-Trading is never sent through the API: cancelling orders and closing positions
-are always transactions the user's wallet sends to the Lighter contract (on
-Ethereum for Lighter, on Robinhood Chain for Lighter RH). Every other action is
-sent to the Lighter API first (an L2 transaction signed in the browser with a
-key derived from the user's wallet). When the API refuses the account
-(blacklist code 52001, permission code 23100, a 403/451 edge block, or the API
-being unreachable) that action is sent to the contract as well. The user can
-also choose contract-only mode. The rule is `DEFAULT_CONTRACT_SCOPE` in
+Every action is sent to the Lighter API first (an L2 transaction signed in the
+browser with a key derived from the user's wallet). When the API refuses the
+account (blacklist code 52001, permission code 23100, a 403/451 edge block, or
+the API being unreachable) that action is sent to the Lighter contract instead,
+as a transaction from the user's wallet (on Ethereum for Lighter, on Robinhood
+Chain for Lighter RH). The user can also choose contract-only mode.
+
+Trading (cancelling orders, closing positions) reaches the API only from the
+user's own browser, never through this site's server: relaying it would let a
+user whose region Lighter blocks trade from the server's address. So when the
+browser cannot reach Lighter, trading goes straight to the contract, while the
+other steps try the server first (below). The server enforces the same rule
+on its side by refusing tx 14 and 16.
+
+Lighter's regional block sits at its edge and lets reads through: transactions
+from a restricted region get HTTP 403 with code 20558. On load the page asks
+`GET /api/v1/geoLocation` from the browser (the check Lighter's own app uses;
+`fetchRegionRestricted`). When it is refused, trading goes to the contract
+without an API attempt, other transactions go through the server, and reads
+stay direct. The rule is `DEFAULT_CONTRACT_SCOPE` in
 `src/lib/config.ts`, applied by `src/lib/route.ts`.
 
 API requests go straight from the browser to Lighter, so Lighter sees each
@@ -39,8 +51,9 @@ user's own address and rate limits each user separately
 (`src/lib/apiFallback.ts`). When the browser cannot reach Lighter (no answer,
 a read that takes over 15 seconds, or a 403/451 block) the request goes
 through this site's server (`/lighter-api`, `/lighter-api-rh`) instead, and so
-does every later request in that visit. Only when the server route is refused
-as well is the action sent to the contract. While Lighter rate limits the
+does every later request in that visit, except trading transactions, which
+have no server route. Only when the server route is refused as well (or, for
+trading, the browser's) is the action sent to the contract. While Lighter rate limits the
 browser's own address, requests use the server for the cooldown (60 seconds
 after a 405, a few seconds after a 429), following Lighter's documented
 rate-limit behaviour. A 429 about the user's own wallet (transactions are
@@ -54,8 +67,8 @@ it never sends an action to the contract.
 | Step | API route | Contract route |
 | --- | --- | --- |
 | 0 · Unlock signing | wallet `personal_sign` → seed → Lighter key → `ChangePubKey` (tx 8) | `changePubKey(uint48,uint8,bytes)` |
-| 1 · Cancel orders | not used (`CancelAllOrders`, tx 16, testing only) | **always:** `cancelAllOrders(uint48)` |
-| 2 · Close perps | not used (reduce-only IOC market order, tx 14, testing only) | **always:** `createOrder(uint48,uint16,uint48,uint32,uint8,uint8)` |
+| 1 · Cancel orders | `CancelAllOrders` (tx 16), from the browser only | `cancelAllOrders(uint48)` |
+| 2 · Close perps | reduce-only IOC market order (tx 14), from the browser only | `createOrder(uint48,uint16,uint48,uint32,uint8,uint8)` |
 | 3 · Exit pools | `BurnShares` (tx 19) | `burnShares(uint48,uint48,uint64)` |
 | 4 · Unstake | `UnstakeAssets` (tx 36) | none (L2 only) |
 | 5 · Withdraw | `Withdraw` (tx 13), spot route 1 and perps route 0 | `withdraw(uint48,uint16,uint8,uint64)` |
@@ -161,8 +174,9 @@ never put a secret in one (an RPC URL with an API key becomes public); `PORT`,
 
 For testing the routes (on a staging deploy, not production), build with
 `VITE_FORCE_L1_OPTION=1`. The page then shows a "contract routing" switch.
-"Trading on contract" is the default and what production does. "API first"
-also sends cancelling orders and closing positions to the API. "All on
+"API first" is the default and what production does. "Trading on contract"
+sends cancelling orders and closing positions to the contract even when the
+API would take them. "All on
 contract" also sends key registration and every other step that has a contract
 route to the contract, as if the API had refused the account. Unstaking and
 freezing a pool have no contract route and keep using the API.
@@ -231,6 +245,24 @@ share a link, keep in mind:
 - No `frame-ancestors`, HSTS or `X-Frame-Options`: those exist only as headers,
   so on IPFS they come from whatever gateway serves the page.
 
+### Serving it at exit.lighter.eth
+
+The IPFS build's link-preview image points at
+`https://exit.lighter.eth.limo/og.png` (set `VITE_OG_IMAGE_URL` to change it),
+so it works only once that name serves the copy:
+
+1. The owner of `lighter.eth` creates the subname `exit.lighter.eth` in the ENS
+   app (one transaction).
+2. Set its content hash to the `ipfs://<cid>` line `npm run pin:ipfs` prints
+   (one transaction). `lighter.eth` is a wrapped name owned by a Safe, so
+   `node scripts/ens-safe-batch.mjs <cid>` writes a Transaction Builder file
+   that does steps 1 and 2 in one Safe transaction (only step 2 once the
+   subname exists). It simulates the batch as the Safe on mainnet first; load
+   the file in app.safe.global → Apps → Transaction Builder. Share `https://exit.lighter.eth.limo`: apps only build a
+   preview for an ordinary web link.
+3. Every rebuild gives a new CID, so repeat step 2 for each release; until
+   then the old version, image included, keeps being served.
+
 ## Making changes
 
 Read this before changing how the page behaves. Several rules live in more
@@ -252,15 +284,19 @@ than one place and have to move together.
 
 ### The routing rule (API or contract)
 
-Trading (cancelling orders, closing positions) always goes to the contract
-from the user's wallet. Everything else tries the API first. To change which
-side an action is on, change all of these in the same commit:
+Everything tries the API first. Trading (cancelling orders, closing
+positions) reaches the API only from the browser, never through this site's
+server, and goes to the contract when the browser cannot reach Lighter. To
+change which side an action is on, change all of these in the same commit:
 
 1. `src/lib/config.ts`: `DEFAULT_CONTRACT_SCOPE`, and the `trading: true` flag
    on the request in the step component (`src/components/steps/`).
 2. `server/policy.mjs`: `DEFAULT_ALLOWED_TX_TYPES`. The proxy refuses any
-   transaction type that is not listed, so the page and the server must agree.
-   `tests/proxyPolicy.test.ts` fails when they drift.
+   transaction type that is not listed, and the page sends only the listed
+   types through the server (`sendTx` in `src/lib/lighterApi.ts` reads the same
+   list), so a type that is not listed goes from the browser or to the
+   contract. `tests/proxyPolicy.test.ts` and `tests/lighterApiRoutes.test.ts`
+   check both sides.
 3. The words. They are written for the current rule: `Hero.tsx`, step 0 in
    `SigningKeyCard.tsx`, the cancel and close step descriptions, `Faq.tsx`
    ("Who is this for", "In what order", "Unlock API signing", "When does it

@@ -6,7 +6,7 @@ import { useActions, isInFlight } from '../../hooks/useActions'
 import { useTradingOnContract } from '../../hooks/useContractScope'
 import { useEnvironment } from '../../hooks/useEnvironment'
 import { useExitAction, type ExitActionRequest } from '../../hooks/useExitAction'
-import { accountKey } from '../../hooks/useLighterData'
+import { accountKey, useRegionRestricted } from '../../hooks/useLighterData'
 import { useRecheckAfterExecution } from '../../hooks/useRecheckAfterExecution'
 import cn from '../../lib/cn'
 import { TX_TYPE } from '../../lib/config'
@@ -111,6 +111,8 @@ export function ClosePositionsStep({
       label,
       accountIndex,
       trading: true,
+      // The market is missing from the browser's market list: contract only, the API is not tried.
+      forceContract: p.contractOnly,
       l2: {
         txType: TX_TYPE.CREATE_ORDER,
         sign: (nonce) =>
@@ -161,7 +163,9 @@ export function ClosePositionsStep({
     0,
   )
 
-  const onContract = useTradingOnContract()
+  const regionRestricted = useRegionRestricted()
+  const onContract = useTradingOnContract() || regionRestricted
+  const contractOnly = plan.positions.filter((p) => p.contractOnly)
   const l1 = useEnvironment().l1Name
   const anyInFlight = rows.some((r) => isInFlight(actions[r.item.id]))
   // An executed close stays locked until a later read of the account; if that read still lists the
@@ -179,8 +183,10 @@ export function ClosePositionsStep({
       title="Close perp positions"
       description={`Each position is closed with a reduce-only market order for the whole position (Lighter caps very large ones to the market's quote limit; send again if a remainder shows). The price is a bound on the average fill price: the order fills against the live book and stops if going further would push the average past it, leaving the rest open for another try.${
         onContract
-          ? ` Each order is a transaction your wallet sends to the Lighter contract on ${l1}: it costs gas, and Lighter executes it a couple of minutes after it confirms, against the book as it is then.`
-          : ''
+          ? ` Each order is a transaction your wallet sends to the Lighter contract on ${l1}: it costs gas, and Lighter executes it a couple of minutes after it confirms, against the book as it is then.${
+              regionRestricted ? ' Lighter does not accept API transactions from your region, so this goes through the contract.' : ''
+            }`
+          : ` Orders go to Lighter's API from your browser. If your browser cannot reach it, each order is sent as a transaction to the Lighter contract on ${l1} instead: it costs gas, and Lighter executes it a couple of minutes after it confirms.`
       }`}
       state={stepState}
     >
@@ -194,6 +200,13 @@ export function ClosePositionsStep({
           {needsConfirm && (
             <Notice tone="warn">
               Max slippage is above {SLIPPAGE_CONFIRM_ABOVE}%. Orders may fill far from the mark price, so you will be asked to confirm before anything is sent.
+            </Notice>
+          )}
+          {contractOnly.length > 0 && !onContract && (
+            <Notice tone="warn">
+              {contractOnly.map((p) => p.symbol).join(', ')} can&apos;t be closed through the API from here, so{' '}
+              {contractOnly.length === 1 ? 'that position is' : 'those positions are'} closed with a transaction to the Lighter
+              contract on {l1}: it costs gas, and Lighter executes it a couple of minutes after it confirms.
             </Notice>
           )}
           {plan.positions.some((p) => p.openOrders > 0) && plan.openOrders > 0 && (
